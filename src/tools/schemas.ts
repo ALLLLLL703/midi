@@ -15,14 +15,13 @@ export const audioToMidiInputSchema = z.object({
   strictEos: z.boolean().default(false),
   beamSize: z.number().int().min(1).default(1),
   preludeForcing: z.boolean().default(true),
-}).superRefine((input, context) => {
-  if (input.preludeForcing && input.batchSize !== undefined && input.batchSize !== 1) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["batchSize"],
-      message: "batchSize greater than 1 requires preludeForcing=false.",
-    });
-  }
 });
 
 export type AudioToMidiInput = z.infer<typeof audioToMidiInputSchema>;
+
+/** Validates option relationships that must not wrap the public Zod object schema. */
+export function assertCompatibleTranscriptionOptions(input: AudioToMidiInput): void {
+  if (input.preludeForcing && input.batchSize !== undefined && input.batchSize !== 1) {
+    throw new Error("batchSize greater than 1 requires preludeForcing=false.");
+  }
+}

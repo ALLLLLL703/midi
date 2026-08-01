@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { SerialQueue } from "../src/services/serial-queue.js";
 import { buildTranscriptionArguments, type TranscriptionOptions } from "../src/services/muscriptor.js";
-import { audioToMidiInputSchema } from "../src/tools/schemas.js";
+import {
+  assertCompatibleTranscriptionOptions,
+  audioToMidiInputSchema,
+} from "../src/tools/schemas.js";
 
 const options: TranscriptionOptions = {
   model: "medium",
@@ -39,9 +42,10 @@ describe("audioToMidiInputSchema", () => {
   });
 
   it("rejects batching while prelude forcing is enabled", () => {
-    expect(() => audioToMidiInputSchema.parse({ source: "/audio/a.wav", batchSize: 2 })).toThrow(
-      "batchSize greater than 1 requires preludeForcing=false",
-    );
+    const input = audioToMidiInputSchema.parse({ source: "/audio/a.wav", batchSize: 2 });
+    expect(() => {
+      assertCompatibleTranscriptionOptions(input);
+    }).toThrow("batchSize greater than 1 requires preludeForcing=false");
   });
 
   it("rejects arbitrary model URLs", () => {

@@ -4,7 +4,7 @@ import { translate } from "../i18n/translator.js";
 import type { SourceResolver } from "../services/source-resolver.js";
 import type { MuscriptorService } from "../services/muscriptor.js";
 import { AppError, errorMessage } from "../util/app-error.js";
-import { audioToMidiInputSchema } from "./schemas.js";
+import { assertCompatibleTranscriptionOptions, audioToMidiInputSchema } from "./schemas.js";
 
 const transcriptionOutputSchema = z.object({
   outputPath: z.string(),
@@ -45,9 +45,11 @@ export function registerTools(
       inputSchema: audioToMidiInputSchema,
       outputSchema: transcriptionOutputSchema,
     },
-    async ({ source, ...options }, extra) => {
+    async (input, extra) => {
       let resolvedSource;
       try {
+        assertCompatibleTranscriptionOptions(input);
+        const { source, ...options } = input;
         resolvedSource = await sourceResolver.resolve(source, extra.signal);
         const output = await muscriptor.transcribe(
           resolvedSource.path,

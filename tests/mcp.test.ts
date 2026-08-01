@@ -44,6 +44,12 @@ describe("midi MCP tools", () => {
 
     const tools = await client.listTools();
     expect(tools.tools.map(({ name }) => name)).toEqual(["audio_to_midi", "check_model"]);
+    const audioToMidi = tools.tools.find(({ name }) => name === "audio_to_midi");
+    expect(audioToMidi?.inputSchema.properties).toMatchObject({
+      source: { type: "string" },
+      model: { enum: ["small", "medium", "large"] },
+    });
+    expect(audioToMidi?.inputSchema.required).toContain("source");
     const result = await client.callTool({ name: "check_model", arguments: {} });
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toMatchObject({ ready: true });

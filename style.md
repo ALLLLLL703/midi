@@ -77,3 +77,7 @@ MCP 是由宿主按配置启动的 stdio 子进程；变更环境变量后重启
 1. 工程脚手架、配置与安全输入边界。
 2. MuScriptor 适配器、串行队列与两个 MCP 工具。
 3. 场景测试、文档、构建验证和发布准备。
+
+## OpenCode 参数暴露修复
+
+MCP SDK v1.29 无法从经过 `superRefine()` 包装的 Zod object 导出属性，导致 `tools/list` 将 `audio_to_midi` 声明成空参数工具。公开注册 schema 保持为基础 `z.object()`；`batchSize` 与 `preludeForcing` 的跨字段约束由独立纯函数在处理器入口执行。集成测试直接检查 `Client.listTools()` 返回的 `source` 属性和 required 列表，防止服务端校验正常但 MCP 客户端看不到参数的回归。
