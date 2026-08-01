@@ -1,4 +1,4 @@
-import { access, mkdir, realpath } from "node:fs/promises";
+import { access, chmod, lstat, mkdir, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { AppError } from "./app-error.js";
@@ -43,6 +43,7 @@ export async function resolveAllowedFile(
 /** Creates the dedicated output directory and verifies it is writable. */
 export async function ensureWritableDirectory(directory: string): Promise<void> {
   await mkdir(directory, { recursive: true });
+  await chmod(directory, 0o700);
   try {
     await access(directory, constants.W_OK);
   } catch (error) {
@@ -50,4 +51,25 @@ export async function ensureWritableDirectory(directory: string): Promise<void> 
       cause: error,
     });
   }
+}
+
+/** Creates a private, non-symlink child directory under a dedicated output root. */
+export async function ensurePrivateSubdirectory(root: string, name: string): Promise<string> {
+  if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
+    throw new AppError("INVALID_PRIVATE_DIRECTORY", "Private directory name is invalid.");
+  }
+  await ensureWritableDirectory(root);
+  const canonicalRoot = await realpath(root);
+  const directory = resolve(canonicalRoot, name);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const metadata = await lstat(directory);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+    throw new AppError("UNSAFE_PRIVATE_DIRECTORY", `Private work path is not a real directory: ${directory}`);
+  }
+  const canonicalDirectory = await realpath(directory);
+  if (!isWithin(canonicalRoot, canonicalDirectory)) {
+    throw new AppError("UNSAFE_PRIVATE_DIRECTORY", "Private work directory escaped the output root.");
+  }
+  await chmod(canonicalDirectory, 0o700);
+  return canonicalDirectory;
 }

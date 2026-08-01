@@ -5,7 +5,7 @@ const messages = {
   healthCheckFailed: "MuScriptor health check failed.",
   unexpectedError: "An unexpected error occurred.",
   audioToMidiDescription:
-    "Transcribe a local or public HTTPS audio file to a multi-instrument MIDI file with MuScriptor.",
+    "Transcribe audio to multi-instrument MIDI with MuScriptor, optionally adding an isolated lead-vocal melody track.",
   checkModelDescription:
     "Check whether MuScriptor and the writable output directory are ready without loading model weights.",
 } as const;

@@ -18,6 +18,9 @@ const options: TranscriptionOptions = {
   strictEos: true,
   beamSize: 2,
   preludeForcing: false,
+  includeLeadVocal: false,
+  leadVocalVelocity: 127,
+  leadVocalAccompanimentVolume: 89,
 };
 
 describe("buildTranscriptionArguments", () => {

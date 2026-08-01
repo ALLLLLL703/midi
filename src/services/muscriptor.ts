@@ -1,16 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { access, chmod, mkdir, readFile, rename, rm, stat } from "node:fs/promises";
+import { access, chmod, readFile, rename, rm, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { basename, extname, join } from "node:path";
 import type { RuntimeConfig } from "../config/runtime-config.js";
 import { AppError } from "../util/app-error.js";
-import { ensureWritableDirectory } from "../util/path-security.js";
+import { ensurePrivateSubdirectory, ensureWritableDirectory } from "../util/path-security.js";
 import type { ProcessRunner } from "./process-runner.js";
 import { SerialQueue } from "./serial-queue.js";
 import { parseMidi } from "midi-file";
+import type { LeadVocalHealth, LeadVocalProcessor } from "./lead-vocal.js";
 
 export type ModelVariant = "small" | "medium" | "large";
-export type Device = "auto" | "cpu" | "cuda" | `cuda:${number}` | "mps";
+export type Device = "auto" | "cpu" | "cuda" | `cuda:${number}` | "mps" | "xpu";
 export type Dtype = "float32" | "float16" | "bfloat16";
 
 export interface TranscriptionOptions {
@@ -25,6 +26,9 @@ export interface TranscriptionOptions {
   readonly strictEos: boolean;
   readonly beamSize: number;
   readonly preludeForcing: boolean;
+  readonly includeLeadVocal: boolean;
+  readonly leadVocalVelocity: number;
+  readonly leadVocalAccompanimentVolume: number;
 }
 
 export interface TranscriptionResult {
@@ -32,6 +36,8 @@ export interface TranscriptionResult {
   readonly outputBytes: number;
   readonly model: ModelVariant;
   readonly sourceKind: "local" | "url";
+  readonly leadVocalIncluded: boolean;
+  readonly leadVocalNotes?: number | undefined;
 }
 
 export interface HealthReport {
@@ -39,6 +45,7 @@ export interface HealthReport {
   readonly cli: { readonly ok: boolean; readonly detail: string };
   readonly outputDirectory: { readonly ok: boolean; readonly detail: string };
   readonly authentication: { readonly status: "configured" | "unknown"; readonly detail: string };
+  readonly leadVocal: LeadVocalHealth;
 }
 
 const REQUIRED_TRANSCRIBE_FLAGS = [
@@ -105,6 +112,7 @@ export class MuscriptorService {
     private readonly config: RuntimeConfig,
     private readonly runner: ProcessRunner,
     private readonly queue: SerialQueue,
+    private readonly leadVocal?: LeadVocalProcessor,
   ) {}
 
   public async transcribe(
@@ -118,9 +126,10 @@ export class MuscriptorService {
       this.config.outputDirectory,
       `${safeStem(audioPath)}-${randomUUID()}.mid`,
     );
-    const privateOutputDirectory = join(this.config.outputDirectory, ".results");
-    await mkdir(privateOutputDirectory, { recursive: true, mode: 0o700 });
-    await chmod(privateOutputDirectory, 0o700);
+    const privateOutputDirectory = await ensurePrivateSubdirectory(
+      this.config.outputDirectory,
+      ".results",
+    );
     return this.queue.run(async () => {
       console.error(JSON.stringify({ event: "transcription.started", model: options.model, sourceKind }));
       const partialPath = join(privateOutputDirectory, `${randomUUID()}.mid.part`);
@@ -151,15 +160,43 @@ export class MuscriptorService {
         } catch {
           throw new AppError("INVALID_MIDI_OUTPUT", "MuScriptor produced an invalid MIDI file.");
         }
+        const leadVocalNotes = options.includeLeadVocal
+          ? await this.requireLeadVocal().enhance(
+              audioPath,
+              partialPath,
+              {
+                velocity: options.leadVocalVelocity,
+                accompanimentVolume: options.leadVocalAccompanimentVolume,
+              },
+              signal,
+            )
+          : undefined;
+        if (signal?.aborted) {
+          throw new AppError("CANCELLED", "Transcription was cancelled before publishing.");
+        }
         const output = await stat(partialPath);
         await chmod(partialPath, 0o600);
         await rename(partialPath, outputPath);
         console.error(JSON.stringify({ event: "transcription.completed", outputPath, outputBytes: output.size }));
-        return { outputPath, outputBytes: output.size, model: options.model, sourceKind };
+        return {
+          outputPath,
+          outputBytes: output.size,
+          model: options.model,
+          sourceKind,
+          leadVocalIncluded: options.includeLeadVocal,
+          ...(leadVocalNotes === undefined ? {} : { leadVocalNotes }),
+        };
       } finally {
         await rm(partialPath, { force: true });
       }
     }, signal);
+  }
+
+  private requireLeadVocal(): LeadVocalProcessor {
+    if (!this.leadVocal) {
+      throw new AppError("LEAD_VOCAL_UNAVAILABLE", "Lead-vocal processing is not configured.");
+    }
+    return this.leadVocal;
   }
 
   public async checkHealth(environment: NodeJS.ProcessEnv = process.env): Promise<HealthReport> {
@@ -187,6 +224,14 @@ export class MuscriptorService {
     }
 
     const tokenConfigured = Boolean(environment.HF_TOKEN || environment.HUGGING_FACE_HUB_TOKEN);
+    let leadVocal: LeadVocalHealth;
+    try {
+      leadVocal = this.leadVocal
+        ? await this.leadVocal.checkHealth()
+        : { ok: false, detail: "Lead-vocal processing is not configured." };
+    } catch (error) {
+      leadVocal = { ok: false, detail: error instanceof Error ? error.message : String(error) };
+    }
     return {
       ready: cli.ok && outputDirectory.ok,
       cli,
@@ -197,6 +242,7 @@ export class MuscriptorService {
             status: "unknown",
             detail: "No token environment variable was found. Cached Hugging Face login or cached weights may still work.",
           },
+      leadVocal,
     };
   }
 }

@@ -81,3 +81,17 @@ MCP 是由宿主按配置启动的 stdio 子进程；变更环境变量后重启
 ## OpenCode 参数暴露修复
 
 MCP SDK v1.29 无法从经过 `superRefine()` 包装的 Zod object 导出属性，导致 `tools/list` 将 `audio_to_midi` 声明成空参数工具。公开注册 schema 保持为基础 `z.object()`；`batchSize` 与 `preludeForcing` 的跨字段约束由独立纯函数在处理器入口执行。集成测试直接检查 `Client.listTools()` 返回的 `source` 属性和 required 列表，防止服务端校验正常但 MCP 客户端看不到参数的回归。
+
+## 主唱旋律增强
+
+- `audio_to_midi.includeLeadVocal=true` 启用可选增强，默认保持原有快速路径。
+- MuScriptor 先生成完整多轨 MIDI，并保留其 `voice` 伴唱轨。
+- Demucs 以 `--two-stems=vocals` 生成独立人声 stem；Basic Pitch 只分析该 stem，降低伴奏对主旋律识别的干扰。
+- `@tonejs/midi` 以秒为单位读取 Basic Pitch 音符并写入 MuScriptor MIDI，从而跨不同 PPQ/tempo 正确对齐；新轨命名为 `lead vocal`，使用 Voice Oohs（零基 Program 53）。
+- 主唱默认固定 velocity=127 并写入 CC7/CC11=127；非鼓伴奏通道默认写入可调用配置的 CC7=89（约 70%），确保常见 SoundFont 下主唱明显可听。
+- Demucs、Basic Pitch 保持为外部可执行依赖，分别由 `MIDI_MCP_DEMUCS_COMMAND` 和 `MIDI_MCP_BASIC_PITCH_COMMAND` 配置。推荐用独立的 `uv tool install --python 3.11` 环境安装，避免与 MuScriptor 的 Python/PyTorch 依赖冲突。
+- Intel GPU 可通过 PyTorch XPU wheel 加速 MuScriptor，并用 `MIDI_MCP_DEMUCS_DEVICE=xpu` 加速 Demucs；Basic Pitch 0.4.0 的默认 TensorFlow 后端继续使用 CPU。
+- 所有 stem、中间 MIDI 和合并暂存文件位于 0700 私有工作目录，请求结束后清理；任一步失败都不返回缺少主唱轨的半成品。
+- 测试覆盖命令参数、按秒合并、Voice Oohs 音色、依赖缺失、清理以及不开启增强时不调用外部流水线。
+
+参考：Demucs 官方 two-stems vocals CLI；Spotify Basic Pitch 官方 CLI 和“单一乐器输入效果最佳”说明；Tonejs/Midi 的秒级 note API。Demucs 为 MIT，Basic Pitch 为 Apache-2.0，Tonejs/Midi 为 MIT。

@@ -32,13 +32,14 @@ const health: HealthReport = {
   cli: { ok: true, detail: "MuScriptor CLI is available." },
   outputDirectory: { ok: true, detail: "/output" },
   authentication: { status: "unknown", detail: "No token was found." },
+  leadVocal: { ok: true, detail: "Demucs and Basic Pitch are available." },
 };
 
 describe("midi MCP tools", () => {
   it("lists and calls check_model through MCP", async () => {
     const { client } = await connectedClient(
       { path: "/audio/song.wav", sourceKind: "local", cleanup: () => Promise.resolve() },
-      { outputPath: "/output/song.mid", outputBytes: 26, model: "medium", sourceKind: "local" },
+      { outputPath: "/output/song.mid", outputBytes: 26, model: "medium", sourceKind: "local", leadVocalIncluded: false },
       health,
     );
 
@@ -48,6 +49,9 @@ describe("midi MCP tools", () => {
     expect(audioToMidi?.inputSchema.properties).toMatchObject({
       source: { type: "string" },
       model: { enum: ["small", "medium", "large"] },
+      includeLeadVocal: { type: "boolean", default: false },
+      leadVocalVelocity: { type: "integer", default: 127 },
+      leadVocalAccompanimentVolume: { type: "integer", default: 89 },
     });
     expect(audioToMidi?.inputSchema.required).toContain("source");
     const result = await client.callTool({ name: "check_model", arguments: {} });
@@ -57,7 +61,7 @@ describe("midi MCP tools", () => {
   });
 
   it("transcribes with defaults and cleans a resolved source", async () => {
-    const output = { outputPath: "/output/song.mid", outputBytes: 26, model: "medium" as const, sourceKind: "url" as const };
+    const output = { outputPath: "/output/song.mid", outputBytes: 26, model: "medium" as const, sourceKind: "url" as const, leadVocalIncluded: false };
     const { client, cleanup } = await connectedClient(
       { path: "/tmp/song.wav", sourceKind: "url", cleanup: () => Promise.resolve() },
       output,
@@ -77,7 +81,7 @@ describe("midi MCP tools", () => {
   it("returns an MCP validation error for unsafe model values", async () => {
     const { client } = await connectedClient(
       { path: "/audio/song.wav", sourceKind: "local", cleanup: () => Promise.resolve() },
-      { outputPath: "/output/song.mid", outputBytes: 26, model: "medium", sourceKind: "local" },
+      { outputPath: "/output/song.mid", outputBytes: 26, model: "medium", sourceKind: "local", leadVocalIncluded: false },
       health,
     );
 

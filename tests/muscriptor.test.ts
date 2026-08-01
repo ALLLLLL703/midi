@@ -7,6 +7,7 @@ import type { RuntimeConfig } from "../src/config/runtime-config.js";
 import { MuscriptorService, type TranscriptionOptions } from "../src/services/muscriptor.js";
 import type { ProcessRunner } from "../src/services/process-runner.js";
 import { SerialQueue } from "../src/services/serial-queue.js";
+import type { LeadVocalProcessor } from "../src/services/lead-vocal.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -23,6 +24,9 @@ async function temporaryDirectory(): Promise<string> {
 function config(outputDirectory: string): RuntimeConfig {
   return {
     muscriptorCommand: "muscriptor",
+    demucsCommand: "demucs",
+    demucsDevice: "auto",
+    basicPitchCommand: "basic-pitch",
     allowedInputDirectories: [outputDirectory],
     outputDirectory,
     downloadMaxBytes: 1024,
@@ -40,6 +44,9 @@ const options: TranscriptionOptions = {
   strictEos: false,
   beamSize: 1,
   preludeForcing: true,
+  includeLeadVocal: false,
+  leadVocalVelocity: 127,
+  leadVocalAccompanimentVolume: 89,
 };
 
 class OutputRunner implements ProcessRunner {
@@ -51,6 +58,23 @@ class OutputRunner implements ProcessRunner {
     if (!outputPath) throw new Error("Missing output argument");
     await writeFile(outputPath, this.output);
     return { exitCode: this.exitCode, stdout: "", stderr: this.exitCode ? "failed" : "" };
+  }
+}
+
+class LeadVocalStub implements LeadVocalProcessor {
+  public calls = 0;
+  public midiPath?: string;
+
+  public constructor(private readonly failure?: Error) {}
+
+  public enhance(_audioPath: string, midiPath: string): Promise<number> {
+    this.calls += 1;
+    this.midiPath = midiPath;
+    return this.failure ? Promise.reject(this.failure) : Promise.resolve(12);
+  }
+
+  public checkHealth() {
+    return Promise.resolve({ ok: true, detail: "ready" });
   }
 }
 
@@ -99,5 +123,48 @@ describe("MuscriptorService", () => {
     });
     expect(await readdir(outputDirectory)).toEqual([".results"]);
     expect(await readdir(join(outputDirectory, ".results"))).toEqual([]);
+  });
+
+  it("adds lead-vocal metadata when enhancement is requested", async () => {
+    const outputDirectory = await temporaryDirectory();
+    const midi = Buffer.from([
+      0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 0, 96,
+      0x4d, 0x54, 0x72, 0x6b, 0, 0, 0, 4, 0, 0xff, 0x2f, 0,
+    ]);
+    const enhancer = new LeadVocalStub();
+    const service = new MuscriptorService(
+      config(outputDirectory),
+      new OutputRunner(midi),
+      new SerialQueue(),
+      enhancer,
+    );
+
+    const result = await service.transcribe("/audio/song.wav", "local", {
+      ...options,
+      includeLeadVocal: true,
+    });
+
+    expect(enhancer.calls).toBe(1);
+    expect(enhancer.midiPath).toContain("/.results/");
+    expect(result).toMatchObject({ leadVocalIncluded: true, leadVocalNotes: 12 });
+  });
+
+  it("removes the base MIDI when requested lead-vocal enhancement fails", async () => {
+    const outputDirectory = await temporaryDirectory();
+    const midi = Buffer.from([
+      0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 0, 96,
+      0x4d, 0x54, 0x72, 0x6b, 0, 0, 0, 4, 0, 0xff, 0x2f, 0,
+    ]);
+    const service = new MuscriptorService(
+      config(outputDirectory),
+      new OutputRunner(midi),
+      new SerialQueue(),
+      new LeadVocalStub(new Error("enhancement failed")),
+    );
+
+    await expect(
+      service.transcribe("/audio/song.wav", "local", { ...options, includeLeadVocal: true }),
+    ).rejects.toThrow("enhancement failed");
+    expect(await readdir(outputDirectory)).toEqual([".results"]);
   });
 });

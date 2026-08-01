@@ -6,6 +6,9 @@ const positiveInteger = (fallback: number) =>
 
 const environmentSchema = z.object({
   MIDI_MCP_MUSCRIPTOR_COMMAND: z.string().min(1).default("muscriptor"),
+  MIDI_MCP_DEMUCS_COMMAND: z.string().min(1).default("demucs"),
+  MIDI_MCP_DEMUCS_DEVICE: z.string().min(1).default("auto"),
+  MIDI_MCP_BASIC_PITCH_COMMAND: z.string().min(1).default("basic-pitch"),
   MIDI_MCP_ALLOWED_INPUT_DIRS: z.string().optional(),
   MIDI_MCP_OUTPUT_DIR: z.string().optional(),
   MIDI_MCP_DOWNLOAD_MAX_BYTES: positiveInteger(200 * 1024 * 1024),
@@ -16,6 +19,9 @@ const environmentSchema = z.object({
 /** Immutable runtime configuration loaded from the server environment. */
 export interface RuntimeConfig {
   readonly muscriptorCommand: string;
+  readonly demucsCommand: string;
+  readonly demucsDevice: string;
+  readonly basicPitchCommand: string;
   readonly allowedInputDirectories: readonly string[];
   readonly outputDirectory: string;
   readonly downloadMaxBytes: number;
@@ -36,6 +42,9 @@ export function loadRuntimeConfig(
 
   return Object.freeze({
     muscriptorCommand: parsed.MIDI_MCP_MUSCRIPTOR_COMMAND,
+    demucsCommand: parsed.MIDI_MCP_DEMUCS_COMMAND,
+    demucsDevice: parsed.MIDI_MCP_DEMUCS_DEVICE,
+    basicPitchCommand: parsed.MIDI_MCP_BASIC_PITCH_COMMAND,
     allowedInputDirectories: Object.freeze(
       (configuredDirectories?.length ? configuredDirectories : [workingDirectory]).map(
         (directory) => resolve(workingDirectory, directory),

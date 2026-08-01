@@ -11,6 +11,8 @@ const transcriptionOutputSchema = z.object({
   outputBytes: z.number(),
   model: z.enum(["small", "medium", "large"]),
   sourceKind: z.enum(["local", "url"]),
+  leadVocalIncluded: z.boolean(),
+  leadVocalNotes: z.number().int().nonnegative().optional(),
 });
 
 const healthOutputSchema = z.object({
@@ -21,6 +23,7 @@ const healthOutputSchema = z.object({
     status: z.enum(["configured", "unknown"]),
     detail: z.string(),
   }),
+  leadVocal: z.object({ ok: z.boolean(), detail: z.string() }),
 });
 
 function toolError(error: unknown, fallback: string) {

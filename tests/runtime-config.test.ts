@@ -8,6 +8,9 @@ describe("loadRuntimeConfig", () => {
 
     expect(config).toMatchObject({
       muscriptorCommand: "muscriptor",
+      demucsCommand: "demucs",
+      demucsDevice: "auto",
+      basicPitchCommand: "basic-pitch",
       allowedInputDirectories: ["/workspace"],
       outputDirectory: "/workspace/.midi-output",
       downloadMaxBytes: 200 * 1024 * 1024,

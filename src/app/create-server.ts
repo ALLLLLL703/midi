@@ -6,6 +6,7 @@ import { NodeProcessRunner } from "../services/process-runner.js";
 import { SerialQueue } from "../services/serial-queue.js";
 import { SourceResolver } from "../services/source-resolver.js";
 import { registerTools } from "../tools/register-tools.js";
+import { LeadVocalService } from "../services/lead-vocal.js";
 
 /** Composes a midi MCP server with production service implementations. */
 export function createServer(config: RuntimeConfig): McpServer {
@@ -15,11 +16,9 @@ export function createServer(config: RuntimeConfig): McpServer {
     config.downloadTimeoutMs,
   );
   const sourceResolver = new SourceResolver(config, downloader);
-  const muscriptor = new MuscriptorService(
-    config,
-    new NodeProcessRunner(),
-    new SerialQueue(),
-  );
+  const runner = new NodeProcessRunner();
+  const leadVocal = new LeadVocalService(config, runner);
+  const muscriptor = new MuscriptorService(config, runner, new SerialQueue(), leadVocal);
   registerTools(server, sourceResolver, muscriptor);
   return server;
 }

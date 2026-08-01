@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const deviceSchema = z.string().regex(/^(auto|cpu|cuda(?::\d+)?|mps)$/);
+const deviceSchema = z.string().regex(/^(auto|cpu|cuda(?::\d+)?|mps|xpu)$/);
 
 export const audioToMidiInputSchema = z.object({
   source: z.string().min(1).describe("Allowed local path or public HTTPS audio URL."),
@@ -15,6 +15,15 @@ export const audioToMidiInputSchema = z.object({
   strictEos: z.boolean().default(false),
   beamSize: z.number().int().min(1).default(1),
   preludeForcing: z.boolean().default(true),
+  includeLeadVocal: z.boolean().default(false).describe(
+    "Separate vocals with Demucs and add a Basic Pitch lead-vocal melody track.",
+  ),
+  leadVocalVelocity: z.number().int().min(1).max(127).default(127).describe(
+    "Fixed MIDI velocity for lead-vocal notes.",
+  ),
+  leadVocalAccompanimentVolume: z.number().int().min(0).max(127).default(89).describe(
+    "MIDI CC7 volume applied to non-drum accompaniment channels when lead vocals are enabled.",
+  ),
 });
 
 export type AudioToMidiInput = z.infer<typeof audioToMidiInputSchema>;

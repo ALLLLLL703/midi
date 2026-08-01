@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { rm } from "node:fs/promises";
 import { isPublicAddress, SecureHttpsDownloader } from "../src/services/https-downloader.js";
-import { resolveAllowedFile } from "../src/util/path-security.js";
+import { ensurePrivateSubdirectory, resolveAllowedFile } from "../src/util/path-security.js";
 import { SourceResolver } from "../src/services/source-resolver.js";
 import type { RuntimeConfig } from "../src/config/runtime-config.js";
 
@@ -92,6 +92,9 @@ describe("SourceResolver", () => {
     await writeFile(input, "original audio");
     const config: RuntimeConfig = {
       muscriptorCommand: "muscriptor",
+      demucsCommand: "demucs",
+      demucsDevice: "auto",
+      basicPitchCommand: "basic-pitch",
       allowedInputDirectories: [root],
       outputDirectory: output,
       downloadMaxBytes: 1024,
@@ -114,6 +117,9 @@ describe("SourceResolver", () => {
     const root = await temporaryDirectory();
     const config: RuntimeConfig = {
       muscriptorCommand: "muscriptor",
+      demucsCommand: "demucs",
+      demucsDevice: "auto",
+      basicPitchCommand: "basic-pitch",
       allowedInputDirectories: [root],
       outputDirectory: root,
       downloadMaxBytes: 1024,
@@ -136,6 +142,9 @@ describe("SourceResolver", () => {
     await writeFile(input, "too large");
     const config: RuntimeConfig = {
       muscriptorCommand: "muscriptor",
+      demucsCommand: "demucs",
+      demucsDevice: "auto",
+      basicPitchCommand: "basic-pitch",
       allowedInputDirectories: [root],
       outputDirectory: output,
       downloadMaxBytes: 4,
@@ -147,5 +156,17 @@ describe("SourceResolver", () => {
     });
 
     await expect(resolver.resolve(input)).rejects.toMatchObject({ code: "INPUT_TOO_LARGE" });
+  });
+});
+
+describe("ensurePrivateSubdirectory", () => {
+  it("rejects a pre-existing symbolic-link work directory", async () => {
+    const output = await temporaryDirectory();
+    const outside = await temporaryDirectory();
+    await symlink(outside, join(output, ".lead-vocal"));
+
+    await expect(ensurePrivateSubdirectory(output, ".lead-vocal")).rejects.toMatchObject({
+      code: "UNSAFE_PRIVATE_DIRECTORY",
+    });
   });
 });
