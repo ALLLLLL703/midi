@@ -15,7 +15,6 @@ export const audioToMidiInputSchema = z.object({
   strictEos: z.boolean().default(false),
   beamSize: z.number().int().min(1).default(1),
   preludeForcing: z.boolean().default(true),
-  detectTempo: z.enum(["true", "false", "best-effort"]).default("best-effort"),
 }).superRefine((input, context) => {
   if (input.preludeForcing && input.batchSize !== undefined && input.batchSize !== 1) {
     context.addIssue({

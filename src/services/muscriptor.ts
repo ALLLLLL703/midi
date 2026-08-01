@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { access, stat } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { basename, extname, join } from "node:path";
 import type { RuntimeConfig } from "../config/runtime-config.js";
@@ -7,11 +7,11 @@ import { AppError } from "../util/app-error.js";
 import { ensureWritableDirectory } from "../util/path-security.js";
 import type { ProcessRunner } from "./process-runner.js";
 import { SerialQueue } from "./serial-queue.js";
+import { parseMidi } from "midi-file";
 
 export type ModelVariant = "small" | "medium" | "large";
 export type Device = "auto" | "cpu" | "cuda" | `cuda:${number}` | "mps";
 export type Dtype = "float32" | "float16" | "bfloat16";
-export type TempoDetection = "true" | "false" | "best-effort";
 
 export interface TranscriptionOptions {
   readonly model: ModelVariant;
@@ -25,7 +25,6 @@ export interface TranscriptionOptions {
   readonly strictEos: boolean;
   readonly beamSize: number;
   readonly preludeForcing: boolean;
-  readonly detectTempo: TempoDetection;
 }
 
 export interface TranscriptionResult {
@@ -41,6 +40,22 @@ export interface HealthReport {
   readonly outputDirectory: { readonly ok: boolean; readonly detail: string };
   readonly authentication: { readonly status: "configured" | "unknown"; readonly detail: string };
 }
+
+const REQUIRED_TRANSCRIBE_FLAGS = [
+  "--output",
+  "--format",
+  "--sampling",
+  "--temperature",
+  "--cfg-coef",
+  "--model",
+  "--device",
+  "--dtype",
+  "--batch-size",
+  "--strict-eos",
+  "--beam-size",
+  "--prelude-forcing",
+  "--instruments",
+] as const;
 
 function safeStem(inputPath: string): string {
   const stem = basename(inputPath, extname(inputPath))
@@ -74,8 +89,6 @@ export function buildTranscriptionArguments(
     String(options.cfgCoef),
     "--beam-size",
     String(options.beamSize),
-    "--detect-tempo",
-    options.detectTempo,
     options.preludeForcing ? "--prelude-forcing" : "--no-prelude-forcing",
   ];
   if (options.dtype) arguments_.push("--dtype", options.dtype);
@@ -98,45 +111,69 @@ export class MuscriptorService {
     audioPath: string,
     sourceKind: "local" | "url",
     options: TranscriptionOptions,
+    signal?: AbortSignal,
   ): Promise<TranscriptionResult> {
     await ensureWritableDirectory(this.config.outputDirectory);
     const outputPath = join(
       this.config.outputDirectory,
       `${safeStem(audioPath)}-${randomUUID()}.mid`,
     );
+    const privateOutputDirectory = join(this.config.outputDirectory, ".results");
+    await mkdir(privateOutputDirectory, { recursive: true, mode: 0o700 });
+    await chmod(privateOutputDirectory, 0o700);
     return this.queue.run(async () => {
       console.error(JSON.stringify({ event: "transcription.started", model: options.model, sourceKind }));
-      const result = await this.runner.run(
-        this.config.muscriptorCommand,
-        buildTranscriptionArguments(audioPath, outputPath, options),
-        this.config.processTimeoutMs,
-      );
-      if (result.exitCode !== 0) {
-        throw new AppError(
-          "MUSCRIPTOR_FAILED",
-          result.stderr.trim() || `MuScriptor exited with code ${result.exitCode}.`,
-        );
-      }
+      const partialPath = join(privateOutputDirectory, `${randomUUID()}.mid.part`);
       try {
-        await access(outputPath, constants.R_OK);
-      } catch (error) {
-        throw new AppError("MIDI_OUTPUT_MISSING", "MuScriptor completed without creating a readable MIDI file.", {
-          cause: error,
-        });
+        const result = await this.runner.run(
+          this.config.muscriptorCommand,
+          buildTranscriptionArguments(audioPath, partialPath, options),
+          this.config.processTimeoutMs,
+          signal,
+        );
+        if (result.exitCode !== 0) {
+          throw new AppError(
+            "MUSCRIPTOR_FAILED",
+            result.stderr.trim() || `MuScriptor exited with code ${result.exitCode}.`,
+          );
+        }
+        try {
+          await access(partialPath, constants.R_OK);
+        } catch (error) {
+          throw new AppError("MIDI_OUTPUT_MISSING", "MuScriptor completed without creating a readable MIDI file.", {
+            cause: error,
+          });
+        }
+        const midiBytes = await readFile(partialPath);
+        try {
+          const midi = parseMidi(midiBytes);
+          if (midi.tracks.length === 0) throw new Error("MIDI contains no tracks");
+        } catch {
+          throw new AppError("INVALID_MIDI_OUTPUT", "MuScriptor produced an invalid MIDI file.");
+        }
+        const output = await stat(partialPath);
+        await chmod(partialPath, 0o600);
+        await rename(partialPath, outputPath);
+        console.error(JSON.stringify({ event: "transcription.completed", outputPath, outputBytes: output.size }));
+        return { outputPath, outputBytes: output.size, model: options.model, sourceKind };
+      } finally {
+        await rm(partialPath, { force: true });
       }
-      const output = await stat(outputPath);
-      console.error(JSON.stringify({ event: "transcription.completed", outputPath, outputBytes: output.size }));
-      return { outputPath, outputBytes: output.size, model: options.model, sourceKind };
-    });
+    }, signal);
   }
 
   public async checkHealth(environment: NodeJS.ProcessEnv = process.env): Promise<HealthReport> {
     let cli: HealthReport["cli"];
     try {
-      const result = await this.runner.run(this.config.muscriptorCommand, ["--help"], 30_000);
-      cli = result.exitCode === 0
-        ? { ok: true, detail: "MuScriptor CLI is available." }
-        : { ok: false, detail: result.stderr.trim() || `MuScriptor exited with code ${result.exitCode}.` };
+      const result = await this.runner.run(this.config.muscriptorCommand, ["transcribe", "--help"], 30_000);
+      const missingFlags = REQUIRED_TRANSCRIBE_FLAGS.filter((flag) => !result.stdout.includes(flag));
+      if (result.exitCode !== 0) {
+        cli = { ok: false, detail: result.stderr.trim() || `MuScriptor exited with code ${result.exitCode}.` };
+      } else if (missingFlags.length) {
+        cli = { ok: false, detail: `MuScriptor is missing required CLI options: ${missingFlags.join(", ")}.` };
+      } else {
+        cli = { ok: true, detail: "MuScriptor CLI is available and compatible." };
+      }
     } catch (error) {
       cli = { ok: false, detail: error instanceof Error ? error.message : String(error) };
     }

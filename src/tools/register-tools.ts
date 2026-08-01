@@ -35,8 +35,8 @@ function toolError(error: unknown, fallback: string) {
 /** Registers the public midi MCP tool surface. */
 export function registerTools(
   server: McpServer,
-  sourceResolver: SourceResolver,
-  muscriptor: MuscriptorService,
+  sourceResolver: Pick<SourceResolver, "resolve">,
+  muscriptor: Pick<MuscriptorService, "transcribe" | "checkHealth">,
 ): void {
   server.registerTool(
     "audio_to_midi",
@@ -45,14 +45,15 @@ export function registerTools(
       inputSchema: audioToMidiInputSchema,
       outputSchema: transcriptionOutputSchema,
     },
-    async ({ source, ...options }) => {
+    async ({ source, ...options }, extra) => {
       let resolvedSource;
       try {
-        resolvedSource = await sourceResolver.resolve(source);
+        resolvedSource = await sourceResolver.resolve(source, extra.signal);
         const output = await muscriptor.transcribe(
           resolvedSource.path,
           resolvedSource.sourceKind,
           options,
+          extra.signal,
         );
         return {
           content: [{ type: "text", text: JSON.stringify(output) }],
@@ -61,7 +62,11 @@ export function registerTools(
       } catch (error) {
         return toolError(error, translate("transcriptionFailed"));
       } finally {
-        await resolvedSource?.cleanup();
+        try {
+          await resolvedSource?.cleanup();
+        } catch (cleanupError) {
+          console.error(JSON.stringify({ event: "source.cleanup_failed", error: errorMessage(cleanupError) }));
+        }
       }
     },
   );

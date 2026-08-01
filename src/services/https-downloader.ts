@@ -1,8 +1,9 @@
 import { createWriteStream } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { chmod, mkdir, rm } from "node:fs/promises";
 import { request } from "node:https";
 import { lookup as dnsLookup } from "node:dns";
 import type { LookupFunction } from "node:net";
+import { isIP } from "node:net";
 import { pipeline } from "node:stream/promises";
 import { Transform } from "node:stream";
 import { dirname } from "node:path";
@@ -11,7 +12,7 @@ import { AppError } from "../util/app-error.js";
 
 const MAX_REDIRECTS = 5;
 
-function isPublicAddress(address: string): boolean {
+export function isPublicAddress(address: string): boolean {
   try {
     return ipaddr.process(address).range() === "unicast";
   } catch {
@@ -50,6 +51,10 @@ function openPublicHttps(url: URL, signal: AbortSignal): Promise<import("node:ht
   if (url.username || url.password) {
     throw new AppError("URL_CREDENTIALS_BLOCKED", "URLs containing credentials are not allowed.");
   }
+  const literalHost = url.hostname.replace(/^\[|\]$/g, "");
+  if (isIP(literalHost) && !isPublicAddress(literalHost)) {
+    throw new AppError("PRIVATE_NETWORK_BLOCKED", "The URL targets a non-public network address.");
+  }
   return new Promise((resolve, reject) => {
     const request_ = request(url, { lookup: publicLookup, signal }, resolve);
     request_.once("error", reject);
@@ -80,7 +85,7 @@ async function followRedirects(
 }
 
 export interface HttpsDownloader {
-  download(url: URL, destination: string): Promise<void>;
+  download(url: URL, destination: string, signal?: AbortSignal): Promise<void>;
 }
 
 /** Downloads public HTTPS content with redirect, timeout, and byte limits. */
@@ -90,14 +95,13 @@ export class SecureHttpsDownloader implements HttpsDownloader {
     private readonly timeoutMs: number,
   ) {}
 
-  public async download(url: URL, destination: string): Promise<void> {
-    await mkdir(dirname(destination), { recursive: true });
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      controller.abort();
-    }, this.timeoutMs);
+  public async download(url: URL, destination: string, signal?: AbortSignal): Promise<void> {
+    await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+    await chmod(dirname(destination), 0o700);
+    const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
+    const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
     try {
-      const response = await followRedirects(url, controller.signal);
+      const response = await followRedirects(url, combinedSignal);
       const declaredLength = Number(response.headers["content-length"] ?? 0);
       if (declaredLength > this.maxBytes) {
         response.resume();
@@ -115,15 +119,16 @@ export class SecureHttpsDownloader implements HttpsDownloader {
           );
         },
       });
-      await pipeline(response, limiter, createWriteStream(destination, { flags: "wx" }));
+      await pipeline(response, limiter, createWriteStream(destination, { flags: "wx", mode: 0o600 }));
     } catch (error) {
       await rm(destination, { force: true });
-      if (controller.signal.aborted) {
+      if (signal?.aborted) {
+        throw new AppError("CANCELLED", "Audio download was cancelled.", { cause: error });
+      }
+      if (timeoutSignal.aborted) {
         throw new AppError("DOWNLOAD_TIMEOUT", "Audio download exceeded the configured timeout.", { cause: error });
       }
       throw error;
-    } finally {
-      clearTimeout(timer);
     }
   }
 }

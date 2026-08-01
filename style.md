@@ -9,7 +9,7 @@
 - Node.js 22+，TypeScript，MCP stdio transport。
 - Linux 首版，默认模型 `medium`。
 - 输入支持允许目录内的本地文件，以及仅公网可达的 HTTPS URL。
-- 远程下载默认上限 200 MB、超时 5 分钟；两者可配置。
+- 本地和远程音频默认上限 200 MB，远程下载超时 5 分钟；两者可配置。
 - 输出写入专用目录并使用唯一文件名，不覆盖已有文件。
 - 转录任务使用进程内串行队列，避免多个模型进程争抢 CPU/GPU 内存。
 - 固定生成 MIDI，不提供 JSON 事件或 auralization；开放其余相关 CLI 转录参数。
@@ -68,6 +68,7 @@ MCP 是由宿主按配置启动的 stdio 子进程；变更环境变量后重启
 
 - `muscriptor/muscriptor`：以官方 `muscriptor transcribe` 参数和错误行为为唯一 CLI 契约来源，避免自行实现音频转录。
 - `@modelcontextprotocol/sdk` v1.29：采用官方 `McpServer.registerTool`、Zod schema、`structuredContent` 和 `StdioServerTransport`。
+- `midi-file` v1.2.4：解析并验证 MuScriptor 产出的 Standard MIDI File，拒绝损坏或无轨道结果。
 - `xiaolaa2/ableton-copilot-mcp`：仅参考其 TypeScript MCP 的分层方向；不采用装饰器、数据库等与本项目无关的复杂结构。
 - 使用 SDK 自带 MCP 能力、Zod 配置校验和 Node 标准库下载/子进程 API。公网 IP 分类若标准库不足，将选用成熟的小型依赖，避免手写易错地址规则。
 

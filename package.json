@@ -36,6 +36,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ipaddr.js": "^2.2.0",
+    "midi-file": "^1.2.4",
     "zod": "^3.25.76"
   },
   "devDependencies": {
