@@ -48,6 +48,7 @@ describe("midi MCP tools", () => {
     const audioToMidi = tools.tools.find(({ name }) => name === "audio_to_midi");
     expect(audioToMidi?.inputSchema.properties).toMatchObject({
       source: { type: "string" },
+      outputFileName: { type: "string" },
       model: { enum: ["small", "medium", "large"] },
       includeLeadVocal: { type: "boolean", default: false },
       leadVocalVelocity: { type: "integer", default: 127 },

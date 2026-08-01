@@ -112,6 +112,7 @@ node dist/index.js
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `source` | 必填 | 允许目录中的本地路径，或公网 HTTPS URL |
+| `outputFileName` | 自动唯一名称 | 输出目录内的安全文件名；自动补 `.mid`，已存在时拒绝覆盖 |
 | `model` | `medium` | `small`、`medium` 或 `large` |
 | `device` | `auto` | `auto`、`cpu`、`cuda`、`cuda:N` 或 `mps` |
 | `dtype` | MuScriptor 默认 | `float32`、`float16` 或 `bfloat16` |

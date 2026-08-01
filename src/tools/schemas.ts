@@ -4,6 +4,9 @@ const deviceSchema = z.string().regex(/^(auto|cpu|cuda(?::\d+)?|mps|xpu)$/);
 
 export const audioToMidiInputSchema = z.object({
   source: z.string().min(1).describe("Allowed local path or public HTTPS audio URL."),
+  outputFileName: z.string().min(1).max(255).optional().describe(
+    "Optional output basename. A .mid extension is added automatically; existing files are never overwritten.",
+  ),
   model: z.enum(["small", "medium", "large"]).default("medium"),
   device: deviceSchema.default("auto"),
   dtype: z.enum(["float32", "float16", "bfloat16"]).optional(),

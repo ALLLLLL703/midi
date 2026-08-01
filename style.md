@@ -95,3 +95,10 @@ MCP SDK v1.29 无法从经过 `superRefine()` 包装的 Zod object 导出属性�
 - 测试覆盖命令参数、按秒合并、Voice Oohs 音色、依赖缺失、清理以及不开启增强时不调用外部流水线。
 
 参考：Demucs 官方 two-stems vocals CLI；Spotify Basic Pitch 官方 CLI 和“单一乐器输入效果最佳”说明；Tonejs/Midi 的秒级 note API。Demucs 为 MIT，Basic Pitch 为 Apache-2.0，Tonejs/Midi 为 MIT。
+
+## 自定义输出文件名
+
+- `audio_to_midi.outputFileName` 可选；只接受专用输出目录内的单一 basename，缺少 `.mid` 时自动补全。
+- 拒绝路径分隔符、控制字符、`.` 和 `..`，不允许借此突破输出目录。
+- 自定义目标通过同文件系统原子硬链接发布；目标已存在时返回 `OUTPUT_ALREADY_EXISTS`，绝不覆盖并发或历史结果。
+- 未指定时继续使用安全 stem 与 UUID，保持原行为。

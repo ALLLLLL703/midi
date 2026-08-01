@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { access, chmod, readFile, rename, rm, stat } from "node:fs/promises";
+import { access, chmod, link, readFile, rename, rm, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { basename, extname, join } from "node:path";
 import type { RuntimeConfig } from "../config/runtime-config.js";
@@ -29,6 +29,7 @@ export interface TranscriptionOptions {
   readonly includeLeadVocal: boolean;
   readonly leadVocalVelocity: number;
   readonly leadVocalAccompanimentVolume: number;
+  readonly outputFileName?: string | undefined;
 }
 
 export interface TranscriptionResult {
@@ -71,6 +72,34 @@ function safeStem(inputPath: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
   return stem || "transcription";
+}
+
+/** Resolves a safe basename inside the dedicated output directory. */
+export function customOutputPath(outputDirectory: string, fileName: string): string {
+  const trimmed = fileName.trim();
+  let hasControlCharacter = false;
+  for (const character of trimmed) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (codePoint < 32 || codePoint === 127) {
+      hasControlCharacter = true;
+      break;
+    }
+  }
+  if (
+    !trimmed
+    || trimmed === "."
+    || trimmed === ".."
+    || trimmed.includes("/")
+    || trimmed.includes("\\")
+    || hasControlCharacter
+  ) {
+    throw new AppError(
+      "INVALID_OUTPUT_FILE_NAME",
+      "outputFileName must be a single safe file name without path separators.",
+    );
+  }
+  const normalized = trimmed.toLowerCase().endsWith(".mid") ? trimmed : `${trimmed}.mid`;
+  return join(outputDirectory, normalized);
 }
 
 /** Converts validated options into shell-free MuScriptor CLI arguments. */
@@ -122,10 +151,19 @@ export class MuscriptorService {
     signal?: AbortSignal,
   ): Promise<TranscriptionResult> {
     await ensureWritableDirectory(this.config.outputDirectory);
-    const outputPath = join(
-      this.config.outputDirectory,
-      `${safeStem(audioPath)}-${randomUUID()}.mid`,
-    );
+    const customName = options.outputFileName;
+    const outputPath = customName
+      ? customOutputPath(this.config.outputDirectory, customName)
+      : join(this.config.outputDirectory, `${safeStem(audioPath)}-${randomUUID()}.mid`);
+    if (customName) {
+      try {
+        await access(outputPath, constants.F_OK);
+        throw new AppError("OUTPUT_ALREADY_EXISTS", `Output file already exists: ${outputPath}`);
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
     const privateOutputDirectory = await ensurePrivateSubdirectory(
       this.config.outputDirectory,
       ".results",
@@ -176,7 +214,18 @@ export class MuscriptorService {
         }
         const output = await stat(partialPath);
         await chmod(partialPath, 0o600);
-        await rename(partialPath, outputPath);
+        if (customName) {
+          try {
+            await link(partialPath, outputPath);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+              throw new AppError("OUTPUT_ALREADY_EXISTS", `Output file already exists: ${outputPath}`);
+            }
+            throw error;
+          }
+        } else {
+          await rename(partialPath, outputPath);
+        }
         console.error(JSON.stringify({ event: "transcription.completed", outputPath, outputBytes: output.size }));
         return {
           outputPath,

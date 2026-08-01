@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { rm } from "node:fs/promises";
 import type { RuntimeConfig } from "../src/config/runtime-config.js";
-import { MuscriptorService, type TranscriptionOptions } from "../src/services/muscriptor.js";
+import {
+  customOutputPath,
+  MuscriptorService,
+  type TranscriptionOptions,
+} from "../src/services/muscriptor.js";
 import type { ProcessRunner } from "../src/services/process-runner.js";
 import { SerialQueue } from "../src/services/serial-queue.js";
 import type { LeadVocalProcessor } from "../src/services/lead-vocal.js";
@@ -166,5 +170,42 @@ describe("MuscriptorService", () => {
       service.transcribe("/audio/song.wav", "local", { ...options, includeLeadVocal: true }),
     ).rejects.toThrow("enhancement failed");
     expect(await readdir(outputDirectory)).toEqual([".results"]);
+  });
+
+  it("publishes a custom basename without overwriting it", async () => {
+    const outputDirectory = await temporaryDirectory();
+    const midi = Buffer.from([
+      0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 0, 96,
+      0x4d, 0x54, 0x72, 0x6b, 0, 0, 0, 4, 0, 0xff, 0x2f, 0,
+    ]);
+    const service = new MuscriptorService(
+      config(outputDirectory),
+      new OutputRunner(midi),
+      new SerialQueue(),
+    );
+
+    const result = await service.transcribe("/audio/song.wav", "local", {
+      ...options,
+      outputFileName: "custom result",
+    });
+    expect(result.outputPath).toBe(join(outputDirectory, "custom result.mid"));
+    await expect(
+      service.transcribe("/audio/song.wav", "local", {
+        ...options,
+        outputFileName: "custom result.mid",
+      }),
+    ).rejects.toMatchObject({ code: "OUTPUT_ALREADY_EXISTS" });
+  });
+});
+
+describe("customOutputPath", () => {
+  it("rejects paths and adds the MIDI extension", () => {
+    expect(customOutputPath("/output", "song")).toBe("/output/song.mid");
+    expect(() => customOutputPath("/output", "../song.mid")).toThrow(
+      "outputFileName must be a single safe file name",
+    );
+    expect(() => customOutputPath("/output", "folder\\song.mid")).toThrow(
+      "outputFileName must be a single safe file name",
+    );
   });
 });
