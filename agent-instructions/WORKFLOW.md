@@ -77,16 +77,25 @@ demucs --two-stems=vocals --device xpu --out <private-work-dir> <audio>
 
 必须同时得到 `vocals.wav` 和 `no_vocals.wav`。缺少任一 stem 都终止，不发布半成品。
 
-### 第二步：分别转写两个 stem
+### 第二步：单独转写人声并验收
 
-两个 stem 均使用用户选择的 `model`、`device`、`dtype`、sampling、beam、batch 和 prelude 参数：
+先只转写 `vocals.wav`，使用用户选择的 `model`、`device`、`dtype`、sampling、beam、batch 和 prelude 参数：
+
+- 使用项目指定的 `ALLLLLL703/muscriptor` fork，不得切换回上游 PyPI 版本或其他转写模型。
+- 输出独立、可直接试听的人声 MIDI，中间文件不得立即合并或删除。
+- 人声 MIDI 完成解析与音域检查后，必须通过 question 工具暂停并询问用户是否满意。
+- 用户回答不满意时，只允许调整 fork、参数或重新生成人声 MIDI；禁止提前处理伴奏或生成最终合并文件。
+- 每次重新生成人声 MIDI 后都必须再次暂停验收，直到用户明确回答满意。
+
+### 第三步：转写伴奏
+
+只有人声 MIDI 通过用户试听验收后才能继续：
 
 - `no_vocals.wav` 保留用户传入的 `instruments` 过滤，生成基础伴奏 MIDI。
-- `vocals.wav` 必须删除 `instruments` 过滤，让 MuScriptor 自动识别全部音色。
-- 两次 MuScriptor 推理顺序执行，不并发争抢 XPU 显存。
+- 人声与伴奏 MuScriptor 推理顺序执行，不并发争抢 XPU 显存。
 - 不转写原始混音，避免一次无效的额外推理。
 
-### 第三步：折叠并合并人声
+### 第四步：折叠并合并人声
 
 - 读取 `vocals.wav` 转写 MIDI 的全部音符轨，包括被标记为 voice、吉他、弦乐或其他音色的轨道。
 - 忽略源轨 program 和名称，使用音符的绝对秒位置映射到伴奏 MIDI 的 tempo map。
@@ -116,6 +125,7 @@ demucs --two-stems=vocals --device xpu --out <private-work-dir> <audio>
 - 自动音色、强制 voice、分段等不同策略必须使用不同文件名，禁止覆盖失败结果；空 MIDI 也保留为失败证据。
 - 所有实验目录权限设为 0700，文件权限设为 0600。
 - 只有方案通过试听验收后，才把对应步骤固化到生产 `includeLeadVocal` 流程并恢复请求结束自动清理。
+- 即使已有可用伴奏 MIDI，新生成的人声版本也必须先独立试听验收；不得利用已有伴奏绕过 question 门。
 
 ## 禁止的默认流程
 
