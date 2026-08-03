@@ -2,9 +2,13 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { translate } from "../i18n/translator.js";
 import type { SourceResolver } from "../services/source-resolver.js";
-import type { MuscriptorService } from "../services/muscriptor.js";
+import type { MuscriptorService, TranscriptionOptions } from "../services/muscriptor.js";
 import { AppError, errorMessage } from "../util/app-error.js";
-import { assertCompatibleTranscriptionOptions, audioToMidiInputSchema } from "./schemas.js";
+import {
+  assertCompatibleTranscriptionOptions,
+  instrumentalAudioToMidiInputSchema,
+  vocalAudioToMidiInputSchema,
+} from "./schemas.js";
 
 const transcriptionOutputSchema = z.object({
   outputPath: z.string(),
@@ -35,6 +39,37 @@ function toolError(error: unknown, fallback: string) {
   };
 }
 
+async function transcribeSource(
+  source: string,
+  options: TranscriptionOptions,
+  signal: AbortSignal,
+  sourceResolver: Pick<SourceResolver, "resolve">,
+  muscriptor: Pick<MuscriptorService, "transcribe">,
+) {
+  let resolvedSource;
+  try {
+    resolvedSource = await sourceResolver.resolve(source, signal);
+    const output = await muscriptor.transcribe(
+      resolvedSource.path,
+      resolvedSource.sourceKind,
+      options,
+      signal,
+    );
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(output) }],
+      structuredContent: { ...output },
+    };
+  } catch (error) {
+    return toolError(error, translate("transcriptionFailed"));
+  } finally {
+    try {
+      await resolvedSource?.cleanup();
+    } catch (cleanupError) {
+      console.error(JSON.stringify({ event: "source.cleanup_failed", error: errorMessage(cleanupError) }));
+    }
+  }
+}
+
 /** Registers the public midi MCP tool surface. */
 export function registerTools(
   server: McpServer,
@@ -42,36 +77,54 @@ export function registerTools(
   muscriptor: Pick<MuscriptorService, "transcribe" | "checkHealth">,
 ): void {
   server.registerTool(
-    "audio_to_midi",
+    "vocal_audio_to_midi",
     {
-      description: translate("audioToMidiDescription"),
-      inputSchema: audioToMidiInputSchema,
+      description: translate("vocalAudioToMidiDescription"),
+      inputSchema: vocalAudioToMidiInputSchema,
       outputSchema: transcriptionOutputSchema,
     },
     async (input, extra) => {
-      let resolvedSource;
       try {
         assertCompatibleTranscriptionOptions(input);
         const { source, ...options } = input;
-        resolvedSource = await sourceResolver.resolve(source, extra.signal);
-        const output = await muscriptor.transcribe(
-          resolvedSource.path,
-          resolvedSource.sourceKind,
-          options,
+        return await transcribeSource(
+          source,
+          { ...options, includeLeadVocal: true },
           extra.signal,
+          sourceResolver,
+          muscriptor,
         );
-        return {
-          content: [{ type: "text", text: JSON.stringify(output) }],
-          structuredContent: { ...output },
-        };
       } catch (error) {
         return toolError(error, translate("transcriptionFailed"));
-      } finally {
-        try {
-          await resolvedSource?.cleanup();
-        } catch (cleanupError) {
-          console.error(JSON.stringify({ event: "source.cleanup_failed", error: errorMessage(cleanupError) }));
-        }
+      }
+    },
+  );
+
+  server.registerTool(
+    "instrumental_audio_to_midi",
+    {
+      description: translate("instrumentalAudioToMidiDescription"),
+      inputSchema: instrumentalAudioToMidiInputSchema,
+      outputSchema: transcriptionOutputSchema,
+    },
+    async (input, extra) => {
+      try {
+        assertCompatibleTranscriptionOptions(input);
+        const { source, ...options } = input;
+        return await transcribeSource(
+          source,
+          {
+            ...options,
+            includeLeadVocal: false,
+            leadVocalVelocity: 127,
+            leadVocalAccompanimentVolume: 89,
+          },
+          extra.signal,
+          sourceResolver,
+          muscriptor,
+        );
+      } catch (error) {
+        return toolError(error, translate("transcriptionFailed"));
       }
     },
   );

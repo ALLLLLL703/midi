@@ -2,7 +2,7 @@
 
 ## 目标
 
-构建一个面向 MuScriptor 的 TypeScript MCP 服务器 `midi`。服务器通过 stdio 暴露 `audio_to_midi` 与 `check_model`，调用本机 `muscriptor` CLI 完成多乐器音频转 MIDI。
+构建一个面向 MuScriptor 的 TypeScript MCP 服务器 `midi`。服务器通过 stdio 暴露 `vocal_audio_to_midi`、`instrumental_audio_to_midi` 与 `check_model`，调用本机 `muscriptor` CLI 完成音频转 MIDI。
 
 ## 已确定边界
 
@@ -24,7 +24,7 @@ src/
   config/       validated environment-backed runtime configuration
   i18n/         stable English message keys and translator
   services/     downloader, serial queue, MuScriptor process adapter
-  tools/        check_model and audio_to_midi registrations
+  tools/        vocal, instrumental, and check_model registrations
   util/         path, URL, process, and error helpers shared across domains
   index.ts      stdio entry point
 tests/          unit and MCP-level scenario tests
@@ -84,24 +84,26 @@ MCP SDK v1.29 无法从经过 `superRefine()` 包装的 Zod object 导出属性�
 
 ## 主唱旋律增强
 
-- `audio_to_midi.includeLeadVocal=true` 启用可选增强，默认保持原有快速路径。
+- 删除含义混杂的 `audio_to_midi`。`vocal_audio_to_midi` 固定执行 Demucs 双 stem、人声转写、伴奏转写和完整 MIDI 合并；`instrumental_audio_to_midi` 直接转写无主唱音频，不运行 Demucs。
+- 人声工具默认使用已通过《天雨》试听验收的 `large`、XPU、float16、batch 1、prelude forcing、beam 3、CFG 1.5；这些参数仍可由调用者覆盖。
+- 人声 stem 固定使用 `voice` 约束，并默认启用 3 次空块回退：优先 beam 3，再以 temperature 0.6、CFG 1.75 采样。伴奏 stem 沿用已验收流程的 beam 1、CFG 1，且不启用空块回退。
 - Demucs 必须先以 `--two-stems=vocals` 生成 `vocals.wav` 和 `no_vocals.wav`，禁止先转写原始混音后再叠加人声。
-- MuScriptor 使用同一组模型、设备和解码参数顺序转写两个 stem；伴奏 MIDI 只来自 `no_vocals.wav`。
-- 转写 `vocals.wav` 时不传 `--instruments`，允许 MuScriptor 使用全部音色表达它检测到的人声。合并阶段忽略源音色和轨道名，将全部音符按秒映射到伴奏 tempo map，折叠成一个 `lead vocal` 轨。
+- MuScriptor 顺序转写两个 stem；先完成人声，再转写伴奏，避免并发争抢 XPU。伴奏 MIDI 只来自 `no_vocals.wav`。
+- 合并阶段忽略人声源 MIDI 的轨道名，将全部音符按秒映射到伴奏 tempo map，折叠成一个 `lead vocal` 轨。
 - `lead vocal` 使用 Choir Aahs（零基 Program 52），避免 Voice Oohs 的异常“wu”音色。
 - 主唱默认固定 velocity=127 并写入 CC7/CC11=127；非鼓伴奏通道默认写入可调用配置的 CC7=89（约 70%），确保常见 SoundFont 下主唱明显可听。
 - Demucs 与 MuScriptor 保持为外部可执行依赖，分别由 `MIDI_MCP_DEMUCS_COMMAND` 和 `MIDI_MCP_MUSCRIPTOR_COMMAND` 配置。
 - 本机 MuScriptor 命令固定指向自有 fork 的 `scripts/muscriptor`；该脚本使用系统 Python、pacman 依赖和 `python-pytorch-xpu`，不创建项目 `.venv` 或 uv tool 环境。
 - Intel GPU 可通过 PyTorch XPU wheel 加速 MuScriptor，并用 `MIDI_MCP_DEMUCS_DEVICE=xpu` 加速 Demucs。
 - 生产请求的所有 stem、中间 MIDI 和合并暂存文件位于 0700 私有工作目录，请求结束后清理；任一步失败都不返回缺少主唱轨的半成品。方法实验阶段改用 0700 持久实验目录，复用已验收 stem，并保留每个 0600 中间产物供试听和回溯。
-- 人声增强采用强制人工验收门：先只发布独立人声 MIDI 并通过 question 等待试听；用户明确满意后才能转写伴奏和生成最终合并 MIDI。不满意时只迭代人声阶段，每一版都重新验收。
-- 测试覆盖 Demucs 双 stem、两次 MuScriptor 调用、人声调用移除乐器过滤、全部源轨折叠、按秒合并、Choir Aahs 音色、依赖缺失、清理以及不开启增强时不调用外部流水线。
+- 方法实验仍采用人工试听门；正式 `vocal_audio_to_midi` 工具按已验收默认参数自动生成完整 MIDI，不暴露中间 stem。
+- 测试覆盖 Demucs 双 stem、两次 MuScriptor 调用、人声 voice/空块参数、伴奏参数隔离、全部源轨折叠、按秒合并、Choir Aahs 音色、依赖缺失、清理以及纯音乐工具不调用外部流水线。
 
 参考：Demucs 官方 two-stems vocals CLI；MuScriptor 官方多乐器转写参数；Tonejs/Midi 的秒级 note API。Demucs 和 Tonejs/Midi 均为 MIT。
 
 ## 自定义输出文件名
 
-- `audio_to_midi.outputFileName` 可选；只接受专用输出目录内的单一 basename，缺少 `.mid` 时自动补全。
+- 两个转写工具的 `outputFileName` 均可选；只接受专用输出目录内的单一 basename，缺少 `.mid` 时自动补全。
 - 拒绝路径分隔符、控制字符、`.` 和 `..`，不允许借此突破输出目录。
 - 自定义目标通过同文件系统原子硬链接发布；目标已存在时返回 `OUTPUT_ALREADY_EXISTS`，绝不覆盖并发或历史结果。
 - 未指定时继续使用安全 stem 与 UUID，保持原行为。

@@ -3,7 +3,8 @@ import { SerialQueue } from "../src/services/serial-queue.js";
 import { buildTranscriptionArguments, type TranscriptionOptions } from "../src/services/muscriptor.js";
 import {
   assertCompatibleTranscriptionOptions,
-  audioToMidiInputSchema,
+  instrumentalAudioToMidiInputSchema,
+  vocalAudioToMidiInputSchema,
 } from "../src/tools/schemas.js";
 
 const options: TranscriptionOptions = {
@@ -21,6 +22,10 @@ const options: TranscriptionOptions = {
   includeLeadVocal: false,
   leadVocalVelocity: 127,
   leadVocalAccompanimentVolume: 89,
+  emptyOutputRetries: 3,
+  emptyOutputTemperature: 0.6,
+  emptyOutputCfgCoef: 1.75,
+  emptyOutputBeamSize: 3,
 };
 
 describe("buildTranscriptionArguments", () => {
@@ -31,28 +36,49 @@ describe("buildTranscriptionArguments", () => {
       "--cfg-coef", "1", "--beam-size", "2",
       "--no-prelude-forcing", "--dtype", "float16", "--instruments",
       "acoustic_piano,drums", "--sampling", "--batch-size", "4", "--strict-eos",
+      "--empty-output-retries", "3", "--empty-output-temperature", "0.6",
+      "--empty-output-cfg-coef", "1.75", "--empty-output-beam-size", "3",
     ]);
   });
 });
 
-describe("audioToMidiInputSchema", () => {
-  it("applies the selected medium model and safe MuScriptor defaults", () => {
-    expect(audioToMidiInputSchema.parse({ source: "/audio/a.wav" })).toMatchObject({
+describe("transcription input schemas", () => {
+  it("applies direct instrumental transcription defaults", () => {
+    expect(instrumentalAudioToMidiInputSchema.parse({ source: "/audio/a.wav" })).toMatchObject({
       model: "medium",
       device: "auto",
+      cfgCoef: 1,
+      beamSize: 1,
       preludeForcing: true,
     });
   });
 
+  it("applies the approved high-quality vocal defaults", () => {
+    expect(vocalAudioToMidiInputSchema.parse({ source: "/audio/a.wav" })).toMatchObject({
+      model: "large",
+      device: "xpu",
+      dtype: "float16",
+      cfgCoef: 1.5,
+      beamSize: 3,
+      emptyOutputRetries: 3,
+      emptyOutputTemperature: 0.6,
+      emptyOutputCfgCoef: 1.75,
+      emptyOutputBeamSize: 3,
+    });
+  });
+
   it("rejects batching while prelude forcing is enabled", () => {
-    const input = audioToMidiInputSchema.parse({ source: "/audio/a.wav", batchSize: 2 });
+    const input = instrumentalAudioToMidiInputSchema.parse({ source: "/audio/a.wav", batchSize: 2 });
     expect(() => {
       assertCompatibleTranscriptionOptions(input);
     }).toThrow("batchSize greater than 1 requires preludeForcing=false");
   });
 
   it("rejects arbitrary model URLs", () => {
-    expect(() => audioToMidiInputSchema.parse({ source: "/audio/a.wav", model: "https://example.com/model" })).toThrow();
+    expect(() => instrumentalAudioToMidiInputSchema.parse({
+      source: "/audio/a.wav",
+      model: "https://example.com/model",
+    })).toThrow();
   });
 });
 

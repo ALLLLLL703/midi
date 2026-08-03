@@ -26,6 +26,10 @@ export interface TranscriptionOptions {
   readonly strictEos: boolean;
   readonly beamSize: number;
   readonly preludeForcing: boolean;
+  readonly emptyOutputRetries?: number | undefined;
+  readonly emptyOutputTemperature?: number | undefined;
+  readonly emptyOutputCfgCoef?: number | undefined;
+  readonly emptyOutputBeamSize?: number | undefined;
   readonly includeLeadVocal: boolean;
   readonly leadVocalVelocity: number;
   readonly leadVocalAccompanimentVolume: number;
@@ -63,6 +67,10 @@ const REQUIRED_TRANSCRIBE_FLAGS = [
   "--beam-size",
   "--prelude-forcing",
   "--instruments",
+  "--empty-output-retries",
+  "--empty-output-temperature",
+  "--empty-output-cfg-coef",
+  "--empty-output-beam-size",
 ] as const;
 
 function safeStem(inputPath: string): string {
@@ -132,6 +140,18 @@ export function buildTranscriptionArguments(
   if (options.sampling) arguments_.push("--sampling");
   if (options.batchSize !== undefined) arguments_.push("--batch-size", String(options.batchSize));
   if (options.strictEos) arguments_.push("--strict-eos");
+  if (options.emptyOutputRetries !== undefined && options.emptyOutputRetries > 0) {
+    arguments_.push("--empty-output-retries", String(options.emptyOutputRetries));
+    if (options.emptyOutputTemperature !== undefined) {
+      arguments_.push("--empty-output-temperature", String(options.emptyOutputTemperature));
+    }
+    if (options.emptyOutputCfgCoef !== undefined) {
+      arguments_.push("--empty-output-cfg-coef", String(options.emptyOutputCfgCoef));
+    }
+    if (options.emptyOutputBeamSize !== undefined) {
+      arguments_.push("--empty-output-beam-size", String(options.emptyOutputBeamSize));
+    }
+  }
   return arguments_;
 }
 

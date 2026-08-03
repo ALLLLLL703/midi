@@ -260,20 +260,27 @@ export class LeadVocalService implements LeadVocalProcessor {
       }
       if (signal?.aborted) throw new AppError("CANCELLED", "Lead-vocal processing was cancelled.");
 
-      const accompanimentMidiPath = join(workDirectory, "accompaniment.mid");
-      console.error(JSON.stringify({ event: "lead_vocal.accompaniment_transcription_started" }));
-      await this.transcribeStem(
-        accompanimentPath,
-        accompanimentMidiPath,
-        transcription,
-        signal,
-      );
       const vocalMidiPath = join(workDirectory, "vocals.mid");
       console.error(JSON.stringify({ event: "lead_vocal.vocal_transcription_started" }));
       await this.transcribeStem(
         vocalsPath,
         vocalMidiPath,
-        { ...transcription, instruments: undefined },
+        { ...transcription, instruments: ["voice"] },
+        signal,
+      );
+      const accompanimentMidiPath = join(workDirectory, "accompaniment.mid");
+      console.error(JSON.stringify({ event: "lead_vocal.accompaniment_transcription_started" }));
+      await this.transcribeStem(
+        accompanimentPath,
+        accompanimentMidiPath,
+        {
+          ...transcription,
+          sampling: false,
+          temperature: 1,
+          cfgCoef: 1,
+          beamSize: 1,
+          emptyOutputRetries: 0,
+        },
         signal,
       );
       if (signal?.aborted) throw new AppError("CANCELLED", "Lead-vocal processing was cancelled.");

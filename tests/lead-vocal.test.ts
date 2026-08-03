@@ -16,14 +16,18 @@ const transcription: TranscriptionOptions = {
   model: "large",
   device: "xpu",
   dtype: "float16",
-  instruments: ["voice"],
+  instruments: ["guitar"],
   sampling: false,
   temperature: 1,
-  cfgCoef: 1,
+  cfgCoef: 1.5,
   batchSize: 1,
   strictEos: false,
-  beamSize: 1,
+  beamSize: 3,
   preludeForcing: true,
+  emptyOutputRetries: 3,
+  emptyOutputTemperature: 0.6,
+  emptyOutputCfgCoef: 1.75,
+  emptyOutputBeamSize: 3,
   includeLeadVocal: true,
   leadVocalVelocity: 127,
   leadVocalAccompanimentVolume: 89,
@@ -226,10 +230,21 @@ describe("LeadVocalService", () => {
     expect(runner.calls.map(({ command }) => command)).toEqual(["demucs", "muscriptor", "muscriptor"]);
     expect(runner.calls[0]?.arguments_).toContain("--two-stems=vocals");
     expect(runner.calls[0]?.arguments_).toEqual(expect.arrayContaining(["--device", "xpu"]));
-    expect(runner.calls[1]?.arguments_.at(1)).toMatch(/no_vocals\.wav$/);
+    expect(runner.calls[1]?.arguments_.at(1)).toMatch(/vocals\.wav$/);
     expect(runner.calls[1]?.arguments_).toEqual(expect.arrayContaining(["--instruments", "voice"]));
-    expect(runner.calls[2]?.arguments_.at(1)).toMatch(/vocals\.wav$/);
-    expect(runner.calls[2]?.arguments_).not.toContain("--instruments");
+    expect(runner.calls[1]?.arguments_).toEqual(expect.arrayContaining([
+      "--empty-output-retries", "3",
+      "--empty-output-temperature", "0.6",
+      "--empty-output-cfg-coef", "1.75",
+      "--empty-output-beam-size", "3",
+    ]));
+    expect(runner.calls[2]?.arguments_.at(1)).toMatch(/no_vocals\.wav$/);
+    expect(runner.calls[2]?.arguments_).toEqual(expect.arrayContaining(["--instruments", "guitar"]));
+    expect(runner.calls[2]?.arguments_).toEqual(expect.arrayContaining([
+      "--cfg-coef", "1",
+      "--beam-size", "1",
+    ]));
+    expect(runner.calls[2]?.arguments_).not.toContain("--empty-output-retries");
     const output = new Midi(await readFile(midiPath));
     const backing = output.tracks.find((track) => track.name === "acoustic guitar");
     const lead = output.tracks.find((track) => track.name === "lead vocal");

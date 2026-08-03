@@ -4,8 +4,10 @@ const messages = {
   transcriptionFailed: "MuScriptor transcription failed.",
   healthCheckFailed: "MuScriptor health check failed.",
   unexpectedError: "An unexpected error occurred.",
-  audioToMidiDescription:
-    "Transcribe audio to multi-instrument MIDI with MuScriptor, optionally separating and collapsing vocal-stem tracks into lead vocal.",
+  vocalAudioToMidiDescription:
+    "Transcribe music with vocals to a complete MIDI: separate vocals with Demucs, transcribe both stems, and merge a dedicated lead-vocal track.",
+  instrumentalAudioToMidiDescription:
+    "Transcribe instrumental or other non-vocal audio directly to multi-instrument MIDI with MuScriptor.",
   checkModelDescription:
     "Check whether MuScriptor and the writable output directory are ready without loading model weights.",
 } as const;
