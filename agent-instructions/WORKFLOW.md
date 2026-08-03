@@ -7,7 +7,7 @@
 ## 共同前置条件
 
 - MCP 使用 TypeScript 构建产物 `dist/index.js`。
-- MuScriptor 使用隔离安装的 XPU 版本：`/home/sanae/.local/bin/muscriptor`。
+- MuScriptor 使用 fork 的系统包启动脚本：`/home/sanae/CodeProject/pythonPro/muscriptor-fork/scripts/muscriptor`。脚本从当前 fork 导入源码，并加载 pacman `python-pytorch-xpu` 所需的 oneAPI 环境；禁止使用 uv/pip 虚拟环境或上游 AUR `muscriptor` 包。
 - Intel Arc Graphics 必须通过 `torch.xpu.is_available()` 检测成功。
 - 模型推理使用 Intel XPU；音频解码、文件暂存和 MIDI 编码仍由 CPU 处理。
 - 输入必须位于 `MIDI_MCP_ALLOWED_INPUT_DIRS` 允许目录中。
@@ -19,7 +19,7 @@
 
 ```json
 {
-  "MIDI_MCP_MUSCRIPTOR_COMMAND": "/home/sanae/.local/bin/muscriptor",
+  "MIDI_MCP_MUSCRIPTOR_COMMAND": "/home/sanae/CodeProject/pythonPro/muscriptor-fork/scripts/muscriptor",
   "MIDI_MCP_ALLOWED_INPUT_DIRS": "/home/sanae/go-musicfox:/home/sanae/Music:/home/sanae/Downloads",
   "MIDI_MCP_OUTPUT_DIR": "/home/sanae/Music/midi-output",
   "MIDI_MCP_PROCESS_TIMEOUT_MS": "3600000"

@@ -91,6 +91,7 @@ MCP SDK v1.29 无法从经过 `superRefine()` 包装的 Zod object 导出属性�
 - `lead vocal` 使用 Choir Aahs（零基 Program 52），避免 Voice Oohs 的异常“wu”音色。
 - 主唱默认固定 velocity=127 并写入 CC7/CC11=127；非鼓伴奏通道默认写入可调用配置的 CC7=89（约 70%），确保常见 SoundFont 下主唱明显可听。
 - Demucs 与 MuScriptor 保持为外部可执行依赖，分别由 `MIDI_MCP_DEMUCS_COMMAND` 和 `MIDI_MCP_MUSCRIPTOR_COMMAND` 配置。
+- 本机 MuScriptor 命令固定指向自有 fork 的 `scripts/muscriptor`；该脚本使用系统 Python、pacman 依赖和 `python-pytorch-xpu`，不创建项目 `.venv` 或 uv tool 环境。
 - Intel GPU 可通过 PyTorch XPU wheel 加速 MuScriptor，并用 `MIDI_MCP_DEMUCS_DEVICE=xpu` 加速 Demucs。
 - 生产请求的所有 stem、中间 MIDI 和合并暂存文件位于 0700 私有工作目录，请求结束后清理；任一步失败都不返回缺少主唱轨的半成品。方法实验阶段改用 0700 持久实验目录，复用已验收 stem，并保留每个 0600 中间产物供试听和回溯。
 - 人声增强采用强制人工验收门：先只发布独立人声 MIDI 并通过 question 等待试听；用户明确满意后才能转写伴奏和生成最终合并 MIDI。不满意时只迭代人声阶段，每一版都重新验收。
