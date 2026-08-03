@@ -107,6 +107,16 @@ demucs --two-stems=vocals --device xpu --out <private-work-dir> <audio>
 5. 人声源 MIDI 与伴奏 MIDI PPQ 或 tempo 不同时，起音秒数仍保持一致。
 6. 最终 MIDI 可解析，输出权限为 0600，私有 stem 工作目录已清空。
 
+### 实验阶段规则
+
+在人声方案尚未通过试听验收时，不使用生产请求的自动清理策略：
+
+- 如果已有用户试听确认的 `vocals.wav` 和 `no_vocals.wav`，直接复用，不重复运行 Demucs。
+- 在 `MIDI_MCP_OUTPUT_DIR/stems/<song>/<experiment>/` 下保留两个 stem、两次 MuScriptor 原始输出、每个分段 WAV/MIDI、折叠后的人声源 MIDI 和最终合并 MIDI。
+- 自动音色、强制 voice、分段等不同策略必须使用不同文件名，禁止覆盖失败结果；空 MIDI 也保留为失败证据。
+- 所有实验目录权限设为 0700，文件权限设为 0600。
+- 只有方案通过试听验收后，才把对应步骤固化到生产 `includeLeadVocal` 流程并恢复请求结束自动清理。
+
 ## 禁止的默认流程
 
 - 禁止使用 Demucs + Basic Pitch 生成 `lead vocal` 轨。实测会出现明显音准错误和异常高音。
