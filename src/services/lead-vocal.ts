@@ -1,14 +1,14 @@
-import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { basename, extname, join } from "node:path";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import ToneMidi from "@tonejs/midi";
 import { parseMidi, writeMidi, type MidiData, type MidiEvent } from "midi-file";
 import type { RuntimeConfig } from "../config/runtime-config.js";
 import { AppError } from "../util/app-error.js";
+import { buildTranscriptionArguments, type TranscriptionOptions } from "./muscriptor.js";
 import type { ProcessRunner } from "./process-runner.js";
 import { ensurePrivateSubdirectory } from "../util/path-security.js";
 
-const VOICE_OOHS_PROGRAM = 53;
+const CHOIR_AAHS_PROGRAM = 52;
 const { Midi } = ToneMidi;
 
 export interface LeadVocalHealth {
@@ -21,6 +21,7 @@ export interface LeadVocalProcessor {
     audioPath: string,
     midiPath: string,
     mix: LeadVocalMix,
+    transcription: TranscriptionOptions,
     signal?: AbortSignal,
   ): Promise<number>;
   checkHealth(): Promise<LeadVocalHealth>;
@@ -118,7 +119,7 @@ function availableMelodyChannel(midi: MidiData): MelodyChannel {
     (candidate) => candidate !== 9 && !used.has(candidate),
   );
   if (channel !== undefined) {
-    return { channel, program: VOICE_OOHS_PROGRAM };
+    return { channel, program: CHOIR_AAHS_PROGRAM };
   }
   if (!existingVoice) {
     throw new AppError("MIDI_CHANNELS_EXHAUSTED", "No MIDI channel is available for lead vocals.");
@@ -126,7 +127,7 @@ function availableMelodyChannel(midi: MidiData): MelodyChannel {
   return existingVoice;
 }
 
-/** Adds Basic Pitch notes as a time-aligned Voice Oohs track to an existing MIDI file. */
+/** Collapses every detected vocal-stem track into one time-aligned lead-vocal track. */
 export function mergeLeadVocalMidi(
   baseBytes: Buffer,
   vocalBytes: Buffer,
@@ -203,7 +204,7 @@ export function mergeLeadVocalMidi(
   return output;
 }
 
-/** Orchestrates vocal separation, melody transcription, and atomic MIDI merging. */
+/** Separates stems, transcribes both with MuScriptor, and merges detected vocal notes. */
 export class LeadVocalService implements LeadVocalProcessor {
   public constructor(
     private readonly config: RuntimeConfig,
@@ -214,6 +215,7 @@ export class LeadVocalService implements LeadVocalProcessor {
     audioPath: string,
     midiPath: string,
     mix: LeadVocalMix,
+    transcription: TranscriptionOptions,
     signal?: AbortSignal,
   ): Promise<number> {
     const workRoot = await ensurePrivateSubdirectory(this.config.outputDirectory, ".lead-vocal");
@@ -246,51 +248,44 @@ export class LeadVocalService implements LeadVocalProcessor {
       if (!vocalsPath) {
         throw new AppError("VOCAL_STEM_MISSING", "Demucs completed without creating vocals.wav.");
       }
-      if (signal?.aborted) throw new AppError("CANCELLED", "Lead-vocal processing was cancelled.");
-
-      const pitchDirectory = join(workDirectory, "pitch");
-      await ensurePrivateSubdirectory(workDirectory, "pitch");
-      console.error(JSON.stringify({ event: "lead_vocal.transcription_started" }));
-      const transcription = await this.runner.run(
-        this.config.basicPitchCommand,
-        [pitchDirectory, vocalsPath],
-        this.config.processTimeoutMs,
-        signal,
+      const accompanimentPath = await findGeneratedFile(
+        workDirectory,
+        (name) => name.toLowerCase() === "no_vocals.wav",
       );
-      if (transcription.exitCode !== 0) {
+      if (!accompanimentPath) {
         throw new AppError(
-          "BASIC_PITCH_FAILED",
-          transcription.stderr.trim() || `Basic Pitch exited with code ${transcription.exitCode}.`,
+          "ACCOMPANIMENT_STEM_MISSING",
+          "Demucs completed without creating no_vocals.wav.",
         );
       }
-      const vocalMidiPath = await findGeneratedFile(
-        pitchDirectory,
-        (name) => name.endsWith("_basic_pitch.mid"),
+      if (signal?.aborted) throw new AppError("CANCELLED", "Lead-vocal processing was cancelled.");
+
+      const accompanimentMidiPath = join(workDirectory, "accompaniment.mid");
+      console.error(JSON.stringify({ event: "lead_vocal.accompaniment_transcription_started" }));
+      await this.transcribeStem(
+        accompanimentPath,
+        accompanimentMidiPath,
+        transcription,
+        signal,
       );
-      if (!vocalMidiPath) {
-        throw new AppError("LEAD_VOCAL_MIDI_MISSING", "Basic Pitch completed without creating a MIDI file.");
-      }
+      const vocalMidiPath = join(workDirectory, "vocals.mid");
+      console.error(JSON.stringify({ event: "lead_vocal.vocal_transcription_started" }));
+      await this.transcribeStem(
+        vocalsPath,
+        vocalMidiPath,
+        { ...transcription, instruments: undefined },
+        signal,
+      );
       if (signal?.aborted) throw new AppError("CANCELLED", "Lead-vocal processing was cancelled.");
 
       const merged = mergeLeadVocalMidi(
-        await readFile(midiPath),
+        await readFile(accompanimentMidiPath),
         await readFile(vocalMidiPath),
         mix,
       );
       const parsed = new Midi(merged);
       const leadTrack = parsed.tracks.find((track) => track.name === "lead vocal");
-      const partialPath = join(
-        this.config.outputDirectory,
-        ".results",
-        `${basename(midiPath, extname(midiPath))}-${randomUUID()}.lead.part`,
-      );
-      try {
-        await writeFile(partialPath, merged, { flag: "wx", mode: 0o600 });
-        if (signal?.aborted) throw new AppError("CANCELLED", "Lead-vocal processing was cancelled.");
-        await rename(partialPath, midiPath);
-      } finally {
-        await rm(partialPath, { force: true });
-      }
+      await writeFile(midiPath, merged, { flag: "wx", mode: 0o600 });
       console.error(JSON.stringify({ event: "lead_vocal.completed", notes: leadTrack?.notes.length ?? 0 }));
       return leadTrack?.notes.length ?? 0;
     } finally {
@@ -298,17 +293,38 @@ export class LeadVocalService implements LeadVocalProcessor {
     }
   }
 
+  private async transcribeStem(
+    audioPath: string,
+    midiPath: string,
+    options: TranscriptionOptions,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const result = await this.runner.run(
+      this.config.muscriptorCommand,
+      buildTranscriptionArguments(audioPath, midiPath, options),
+      this.config.processTimeoutMs,
+      signal,
+    );
+    if (result.exitCode !== 0) {
+      throw new AppError(
+        "MUSCRIPTOR_FAILED",
+        result.stderr.trim() || `MuScriptor exited with code ${result.exitCode}.`,
+      );
+    }
+    try {
+      const midi = parseMidi(await readFile(midiPath));
+      if (midi.tracks.length === 0) throw new Error("MIDI contains no tracks");
+    } catch (error) {
+      throw new AppError("INVALID_MIDI_OUTPUT", "MuScriptor produced an invalid stem MIDI.", {
+        cause: error,
+      });
+    }
+  }
+
   public async checkHealth(): Promise<LeadVocalHealth> {
-    const [demucs, basicPitch] = await Promise.all([
-      this.runner.run(this.config.demucsCommand, ["--help"], 30_000),
-      this.runner.run(this.config.basicPitchCommand, ["--help"], 30_000),
-    ]);
-    const failures = [
-      demucs.exitCode === 0 ? undefined : "Demucs is unavailable.",
-      basicPitch.exitCode === 0 ? undefined : "Basic Pitch is unavailable.",
-    ].filter((detail): detail is string => Boolean(detail));
-    return failures.length
-      ? { ok: false, detail: failures.join(" ") }
-      : { ok: true, detail: "Demucs and Basic Pitch are available." };
+    const demucs = await this.runner.run(this.config.demucsCommand, ["--help"], 30_000);
+    return demucs.exitCode === 0
+      ? { ok: true, detail: "Demucs is available; vocal stems use MuScriptor." }
+      : { ok: false, detail: "Demucs is unavailable." };
   }
 }

@@ -30,7 +30,6 @@ function config(outputDirectory: string): RuntimeConfig {
     muscriptorCommand: "muscriptor",
     demucsCommand: "demucs",
     demucsDevice: "auto",
-    basicPitchCommand: "basic-pitch",
     allowedInputDirectories: [outputDirectory],
     outputDirectory,
     downloadMaxBytes: 1024,
@@ -71,10 +70,15 @@ class LeadVocalStub implements LeadVocalProcessor {
 
   public constructor(private readonly failure?: Error) {}
 
-  public enhance(_audioPath: string, midiPath: string): Promise<number> {
+  public async enhance(_audioPath: string, midiPath: string): Promise<number> {
     this.calls += 1;
     this.midiPath = midiPath;
-    return this.failure ? Promise.reject(this.failure) : Promise.resolve(12);
+    if (this.failure) throw this.failure;
+    await writeFile(midiPath, Buffer.from([
+      0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 0, 96,
+      0x4d, 0x54, 0x72, 0x6b, 0, 0, 0, 4, 0, 0xff, 0x2f, 0,
+    ]));
+    return 12;
   }
 
   public checkHealth() {

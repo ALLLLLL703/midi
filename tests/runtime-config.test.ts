@@ -10,7 +10,6 @@ describe("loadRuntimeConfig", () => {
       muscriptorCommand: "muscriptor",
       demucsCommand: "demucs",
       demucsDevice: "auto",
-      basicPitchCommand: "basic-pitch",
       allowedInputDirectories: ["/workspace"],
       outputDirectory: "/workspace/.midi-output",
       downloadMaxBytes: 200 * 1024 * 1024,

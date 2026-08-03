@@ -172,17 +172,20 @@ export class MuscriptorService {
       console.error(JSON.stringify({ event: "transcription.started", model: options.model, sourceKind }));
       const partialPath = join(privateOutputDirectory, `${randomUUID()}.mid.part`);
       try {
-        const result = await this.runner.run(
-          this.config.muscriptorCommand,
-          buildTranscriptionArguments(audioPath, partialPath, options),
-          this.config.processTimeoutMs,
-          signal,
-        );
-        if (result.exitCode !== 0) {
-          throw new AppError(
-            "MUSCRIPTOR_FAILED",
-            result.stderr.trim() || `MuScriptor exited with code ${result.exitCode}.`,
+        let leadVocalNotes: number | undefined;
+        if (options.includeLeadVocal) {
+          leadVocalNotes = await this.requireLeadVocal().enhance(
+            audioPath,
+            partialPath,
+            {
+              velocity: options.leadVocalVelocity,
+              accompanimentVolume: options.leadVocalAccompanimentVolume,
+            },
+            options,
+            signal,
           );
+        } else {
+          await this.runTranscription(audioPath, partialPath, options, signal);
         }
         try {
           await access(partialPath, constants.R_OK);
@@ -198,17 +201,6 @@ export class MuscriptorService {
         } catch {
           throw new AppError("INVALID_MIDI_OUTPUT", "MuScriptor produced an invalid MIDI file.");
         }
-        const leadVocalNotes = options.includeLeadVocal
-          ? await this.requireLeadVocal().enhance(
-              audioPath,
-              partialPath,
-              {
-                velocity: options.leadVocalVelocity,
-                accompanimentVolume: options.leadVocalAccompanimentVolume,
-              },
-              signal,
-            )
-          : undefined;
         if (signal?.aborted) {
           throw new AppError("CANCELLED", "Transcription was cancelled before publishing.");
         }
@@ -246,6 +238,26 @@ export class MuscriptorService {
       throw new AppError("LEAD_VOCAL_UNAVAILABLE", "Lead-vocal processing is not configured.");
     }
     return this.leadVocal;
+  }
+
+  private async runTranscription(
+    audioPath: string,
+    midiPath: string,
+    options: TranscriptionOptions,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const result = await this.runner.run(
+      this.config.muscriptorCommand,
+      buildTranscriptionArguments(audioPath, midiPath, options),
+      this.config.processTimeoutMs,
+      signal,
+    );
+    if (result.exitCode !== 0) {
+      throw new AppError(
+        "MUSCRIPTOR_FAILED",
+        result.stderr.trim() || `MuScriptor exited with code ${result.exitCode}.`,
+      );
+    }
   }
 
   public async checkHealth(environment: NodeJS.ProcessEnv = process.env): Promise<HealthReport> {

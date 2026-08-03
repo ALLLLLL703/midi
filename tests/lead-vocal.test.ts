@@ -6,11 +6,28 @@ import { afterEach, describe, expect, it } from "vitest";
 import { rm } from "node:fs/promises";
 import type { RuntimeConfig } from "../src/config/runtime-config.js";
 import { LeadVocalService, mergeLeadVocalMidi } from "../src/services/lead-vocal.js";
+import type { TranscriptionOptions } from "../src/services/muscriptor.js";
 import type { ProcessResult, ProcessRunner } from "../src/services/process-runner.js";
 import { parseMidi, writeMidi, type MidiData, type MidiEvent } from "midi-file";
 
 const temporaryDirectories: string[] = [];
 const { Midi } = ToneMidi;
+const transcription: TranscriptionOptions = {
+  model: "large",
+  device: "xpu",
+  dtype: "float16",
+  instruments: ["voice"],
+  sampling: false,
+  temperature: 1,
+  cfgCoef: 1,
+  batchSize: 1,
+  strictEos: false,
+  beamSize: 1,
+  preludeForcing: true,
+  includeLeadVocal: true,
+  leadVocalVelocity: 127,
+  leadVocalAccompanimentVolume: 89,
+};
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
@@ -31,12 +48,24 @@ function midiWithTrack(name: string, program: number, note: number, time: number
   return Buffer.from(midi.toArray());
 }
 
+function vocalStemMidi(): Buffer {
+  const midi = new Midi();
+  const voice = midi.addTrack();
+  voice.name = "voice";
+  voice.instrument.number = 52;
+  voice.addNote({ midi: 64, time: 1.25, duration: 0.5, velocity: 0.8 });
+  const guitar = midi.addTrack();
+  guitar.name = "acoustic guitar";
+  guitar.instrument.number = 24;
+  guitar.addNote({ midi: 67, time: 2.25, duration: 0.5, velocity: 0.8 });
+  return Buffer.from(midi.toArray());
+}
+
 function config(outputDirectory: string): RuntimeConfig {
   return {
     muscriptorCommand: "muscriptor",
     demucsCommand: "demucs",
     demucsDevice: "xpu",
-    basicPitchCommand: "basic-pitch",
     allowedInputDirectories: [outputDirectory],
     outputDirectory,
     downloadMaxBytes: 1024,
@@ -48,6 +77,8 @@ function config(outputDirectory: string): RuntimeConfig {
 class PipelineRunner implements ProcessRunner {
   public readonly calls: { command: string; arguments_: readonly string[] }[] = [];
 
+  public constructor(private readonly omitAccompaniment = false) {}
+
   public async run(command: string, arguments_: readonly string[]): Promise<ProcessResult> {
     this.calls.push({ command, arguments_ });
     if (command === "demucs") {
@@ -58,12 +89,18 @@ class PipelineRunner implements ProcessRunner {
       const stemDirectory = join(outputDirectory, "htdemucs", stem);
       await mkdir(stemDirectory, { recursive: true });
       await writeFile(join(stemDirectory, "vocals.wav"), "vocal audio");
-    } else if (command === "basic-pitch") {
-      const outputDirectory = arguments_[0];
-      if (!outputDirectory) throw new Error("Invalid Basic Pitch arguments");
+      if (!this.omitAccompaniment) {
+        await writeFile(join(stemDirectory, "no_vocals.wav"), "accompaniment audio");
+      }
+    } else if (command === "muscriptor") {
+      const inputPath = arguments_[1];
+      const outputPath = arguments_[arguments_.indexOf("--output") + 1];
+      if (!inputPath || !outputPath) throw new Error("Invalid MuScriptor arguments");
       await writeFile(
-        join(outputDirectory, "vocals_basic_pitch.mid"),
-        midiWithTrack("source", 0, 64, 1.25),
+        outputPath,
+        basename(inputPath) === "vocals.wav"
+          ? vocalStemMidi()
+          : midiWithTrack("acoustic guitar", 24, 60, 0.5),
       );
     }
     return { exitCode: 0, stdout: "", stderr: "" };
@@ -71,7 +108,7 @@ class PipelineRunner implements ProcessRunner {
 }
 
 describe("mergeLeadVocalMidi", () => {
-  it("preserves backing voice and adds a time-aligned Voice Oohs lead track", () => {
+  it("preserves backing tracks and collapses all vocal-stem tracks into Choir Aahs", () => {
     const baseBytes = midiWithTrack("voice", 52, 60, 0.5);
     const mergedBytes = mergeLeadVocalMidi(baseBytes, midiWithTrack("source", 0, 67, 2.25), {
       velocity: 127,
@@ -82,7 +119,7 @@ describe("mergeLeadVocalMidi", () => {
     const backing = merged.tracks.find((track) => track.name === "voice");
     const lead = merged.tracks.find((track) => track.name === "lead vocal");
     expect(backing?.instrument.number).toBe(52);
-    expect(lead?.instrument.number).toBe(53);
+    expect(lead?.instrument.number).toBe(52);
     expect(lead?.notes).toHaveLength(1);
     expect(lead?.notes[0]).toMatchObject({ midi: 67, velocity: 1 });
     expect(lead?.notes[0]?.time).toBeCloseTo(2.25, 2);
@@ -170,33 +207,57 @@ describe("mergeLeadVocalMidi", () => {
 });
 
 describe("LeadVocalService", () => {
-  it("runs separation and transcription, merges the track, and cleans work files", async () => {
+  it("separates first, transcribes both stems, collapses vocal tracks, and cleans work files", async () => {
     const outputDirectory = await temporaryDirectory();
     await mkdir(join(outputDirectory, ".results"));
     const audioPath = join(outputDirectory, "song.flac");
     const midiPath = join(outputDirectory, "song.mid");
     await writeFile(audioPath, "audio");
-    await writeFile(midiPath, midiWithTrack("voice", 52, 60, 0.5));
     const runner = new PipelineRunner();
 
     const noteCount = await new LeadVocalService(config(outputDirectory), runner).enhance(
       audioPath,
       midiPath,
       { velocity: 127, accompanimentVolume: 89 },
+      transcription,
     );
 
-    expect(noteCount).toBe(1);
-    expect(runner.calls.map(({ command }) => command)).toEqual(["demucs", "basic-pitch"]);
+    expect(noteCount).toBe(2);
+    expect(runner.calls.map(({ command }) => command)).toEqual(["demucs", "muscriptor", "muscriptor"]);
     expect(runner.calls[0]?.arguments_).toContain("--two-stems=vocals");
     expect(runner.calls[0]?.arguments_).toEqual(expect.arrayContaining(["--device", "xpu"]));
+    expect(runner.calls[1]?.arguments_.at(1)).toMatch(/no_vocals\.wav$/);
+    expect(runner.calls[1]?.arguments_).toEqual(expect.arrayContaining(["--instruments", "voice"]));
+    expect(runner.calls[2]?.arguments_.at(1)).toMatch(/vocals\.wav$/);
+    expect(runner.calls[2]?.arguments_).not.toContain("--instruments");
     const output = new Midi(await readFile(midiPath));
-    const backing = output.tracks.find((track) => track.name === "voice");
+    const backing = output.tracks.find((track) => track.name === "acoustic guitar");
     const lead = output.tracks.find((track) => track.name === "lead vocal");
     expect(backing?.controlChanges[7]?.[0]?.value).toBeCloseTo(89 / 127, 3);
     expect(output.tracks.filter((track) => track.notes.length === 0)).toHaveLength(0);
     expect(lead?.notes[0]?.velocity).toBe(1);
+    expect(lead?.notes.map((note) => note.midi)).toEqual([64, 67]);
     expect(lead?.controlChanges[7]?.[0]?.value).toBe(1);
     expect(lead?.controlChanges[11]?.[0]?.value).toBe(1);
+    expect(await readdir(join(outputDirectory, ".lead-vocal"))).toEqual([]);
+  });
+
+  it("rejects an incomplete Demucs result before running MuScriptor", async () => {
+    const outputDirectory = await temporaryDirectory();
+    const audioPath = join(outputDirectory, "song.flac");
+    const midiPath = join(outputDirectory, "song.mid");
+    await writeFile(audioPath, "audio");
+    const runner = new PipelineRunner(true);
+
+    await expect(
+      new LeadVocalService(config(outputDirectory), runner).enhance(
+        audioPath,
+        midiPath,
+        { velocity: 127, accompanimentVolume: 89 },
+        transcription,
+      ),
+    ).rejects.toMatchObject({ code: "ACCOMPANIMENT_STEM_MISSING" });
+    expect(runner.calls.map(({ command }) => command)).toEqual(["demucs"]);
     expect(await readdir(join(outputDirectory, ".lead-vocal"))).toEqual([]);
   });
 });

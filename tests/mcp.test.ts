@@ -32,7 +32,7 @@ const health: HealthReport = {
   cli: { ok: true, detail: "MuScriptor CLI is available." },
   outputDirectory: { ok: true, detail: "/output" },
   authentication: { status: "unknown", detail: "No token was found." },
-  leadVocal: { ok: true, detail: "Demucs and Basic Pitch are available." },
+  leadVocal: { ok: true, detail: "Demucs is available; vocal stems use MuScriptor." },
 };
 
 describe("midi MCP tools", () => {

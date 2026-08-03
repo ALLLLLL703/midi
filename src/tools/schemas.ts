@@ -19,7 +19,7 @@ export const audioToMidiInputSchema = z.object({
   beamSize: z.number().int().min(1).default(1),
   preludeForcing: z.boolean().default(true),
   includeLeadVocal: z.boolean().default(false).describe(
-    "Separate vocals with Demucs and add a Basic Pitch lead-vocal melody track.",
+    "Separate vocals with Demucs, transcribe both stems with MuScriptor, and add a collapsed lead-vocal track.",
   ),
   leadVocalVelocity: z.number().int().min(1).max(127).default(127).describe(
     "Fixed MIDI velocity for lead-vocal notes.",

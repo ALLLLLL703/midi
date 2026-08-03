@@ -61,62 +61,56 @@
 4. 确认输出文件权限为 `0600`。
 5. 向用户报告模型、XPU、FP16、耗时、轨道和音符数量。
 
-## 工作流 B：保留并增强 MuScriptor 原生人声
+## 工作流 B：分离后折叠 MuScriptor 人声
 
 ### 目标
 
-使用 MuScriptor 自己识别的 `voice` 轨保留人声旋律，再只调整该轨的 MIDI 响度。该流程不重新估计人声音高，因此不会引入 Basic Pitch 主唱音准偏差。
+先使用 Demucs 分离人声与伴奏，再用同一套 MuScriptor 参数分别转写。人声 stem 中 MuScriptor 检测出的所有音色轨统一折叠为主唱轨，避免强制 `voice` 导致漏唱，也不使用 Basic Pitch。
 
-### 第一步：标准 MuScriptor 转译
+### 第一步：Demucs 分离
 
-先执行工作流 A。保持：
+执行：
 
-```json
-{
-  "model": "large",
-  "device": "xpu",
-  "dtype": "float16",
-  "includeLeadVocal": false,
-  "preludeForcing": true
-}
+```bash
+demucs --two-stems=vocals --device xpu --out <private-work-dir> <audio>
 ```
 
-MuScriptor 自动检测乐器，不传 `instruments:["voice"]`，否则会硬性排除其他乐器。转译后必须检查是否存在名称为 `voice` 的轨道。
+必须同时得到 `vocals.wav` 和 `no_vocals.wav`。缺少任一 stem 都终止，不发布半成品。
 
-如果没有 `voice` 轨：
+### 第二步：分别转写两个 stem
 
-- 不得伪造成功结果。
-- 不得自动启用 Demucs + Basic Pitch。
-- 向用户说明 MuScriptor 没有识别人声，并询问是否接受其他方案。
+两个 stem 均使用用户选择的 `model`、`device`、`dtype`、sampling、beam、batch 和 prelude 参数：
 
-### 第二步：增强现有 voice 轨
+- `no_vocals.wav` 保留用户传入的 `instruments` 过滤，生成基础伴奏 MIDI。
+- `vocals.wav` 必须删除 `instruments` 过滤，让 MuScriptor 自动识别全部音色。
+- 两次 MuScriptor 推理顺序执行，不并发争抢 XPU 显存。
+- 不转写原始混音，避免一次无效的额外推理。
 
-保留原始 MIDI，另存为 `<原名>-voice-boost.mid`。在 Standard MIDI 原始事件层完成以下修改：
+### 第三步：折叠并合并人声
 
-- 只选择轨道名严格等于 `voice` 的轨道。
-- 将该轨所有非零 `noteOn.velocity` 设置为 `127`。
-- 在该轨使用的 MIDI 通道写入 CC7 Channel Volume `127`。
-- 在该轨使用的 MIDI 通道写入 CC11 Expression `127`。
-- 保留 Choir Aahs program、音高、起止时间、其他控制事件及所有其他轨道。
-- 以排他创建方式写入新文件，拒绝覆盖已有结果。
+- 读取 `vocals.wav` 转写 MIDI 的全部音符轨，包括被标记为 voice、吉他、弦乐或其他音色的轨道。
+- 忽略源轨 program 和名称，使用音符的绝对秒位置映射到伴奏 MIDI 的 tempo map。
+- 将全部人声音符写入单一 `lead vocal` 轨，使用 Choir Aahs（零基 Program 52）。
+- 主唱所有 note-on velocity 使用 `leadVocalVelocity`，CC7/CC11 固定为 127。
+- 非鼓伴奏通道写入 `leadVocalAccompanimentVolume`。
+- 保留 `no_vocals.wav` 伴奏 MIDI 的 tempo、PPQ、meta 事件和全部原轨。
+- 最终文件仍通过私有暂存和排他发布，拒绝覆盖已有结果。
 
-优先使用项目已有的 `midi-file` 直接修改原始 SMF 事件。不要用 Tonejs 全量重编码基础 MIDI，因为它可能拆分轨道或丢失未建模事件。
-
-不要默认使用 `midish` 重新导出：它可通过 `tvcurve 63` 提升 velocity，但导入/导出只保留有限 meta 事件，可能丢失轨道名称和其他元数据。只有用户明确接受该损失时才使用。
+使用 `midi-file` 保留基础伴奏事件，只用 Tonejs/Midi 读取人声源轨的秒级音符。不要用 Tonejs 全量重编码基础 MIDI，因为它可能拆分轨道或丢失未建模事件。
 
 ### 人声增强验证
 
-1. 输出 MIDI 的 format、PPQ 和轨道数量与原文件一致。
-2. `voice` 轨音符数量与原文件一致。
-3. `voice` 轨 velocity 的 min、avg、max 均为 `1.0`，即 127/127。
-4. `voice` 轨 CC7 和 CC11 均为 `1.0`。
-5. 其他轨道的音高、节奏、program 和音符数量保持不变。
-6. 原文件保留，新文件使用 `-voice-boost.mid` 后缀。
+1. 输出基础轨来自 `no_vocals.wav` 转写结果，而不是原混音。
+2. `lead vocal` 音符数量等于人声 stem MIDI 全部源轨音符数量之和。
+3. `lead vocal` velocity 等于请求值，CC7 和 CC11 均为 `1.0`。
+4. `lead vocal` program 为零基 52，不得使用 Voice Oohs 53。
+5. 人声源 MIDI 与伴奏 MIDI PPQ 或 tempo 不同时，起音秒数仍保持一致。
+6. 最终 MIDI 可解析，输出权限为 0600，私有 stem 工作目录已清空。
 
 ## 禁止的默认流程
 
-- 不默认使用 Demucs + Basic Pitch 生成 `lead vocal` 轨。实测该方案会出现明显人声音准错误。
-- 不把“存在 voice 音色”误报为“准确提取了主唱”。必须检查实际轨道内容。
+- 禁止使用 Demucs + Basic Pitch 生成 `lead vocal` 轨。实测会出现明显音准错误和异常高音。
+- 禁止对人声 stem 传 `instruments:["voice"]`；这会丢弃 MuScriptor 分配到其他音色的真实人声音符。
+- 不把源轨音色标签当作真实乐器；分离后人声 stem 的全部检测轨都属于主唱候选。
 - 不通过降低模型质量、增加 batch size 或关闭 prelude forcing 来伪装加速，除非用户明确选择速度优先。
 - 不覆盖历史 MIDI 文件。
-- 不因响度不足重新运行音频转录；优先对已生成 MIDI 的原生 `voice` 轨做无损事件级响度调整。
