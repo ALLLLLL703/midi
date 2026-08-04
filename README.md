@@ -124,8 +124,8 @@ node dist/index.js
 | `model` | `large` | 高质量 MuScriptor 模型 |
 | `device` | `xpu` | Intel XPU |
 | `dtype` | `float16` | FP16 推理 |
-| `cfgCoef` | `1.5` | 全局 classifier-free guidance |
-| `beamSize` | `3` | 全局 beam search 宽度 |
+| `cfgCoef` | `1` | 全局 classifier-free guidance；避免整首重复条件计算 |
+| `beamSize` | `1` | 全局贪心解码；仅空块使用 beam 3 回退 |
 | `batchSize` | MuScriptor 默认 1 | 与 prelude forcing 配合顺序转写 |
 | `preludeForcing` | `true` | 保持跨分块延音上下文 |
 | `emptyOutputRetries` | `3` | 人声空块最大回退次数 |

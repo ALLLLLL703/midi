@@ -81,7 +81,7 @@ demucs --two-stems=vocals --device xpu --out <private-work-dir> <audio>
 先只转写 `vocals.wav`，默认参数如下：
 
 - 使用项目指定的 `ALLLLLL703/muscriptor` fork，不得切换回上游 PyPI 版本或其他转写模型。
-- 使用 `large`、XPU、float16、batch 1、prelude forcing、beam 3、CFG 1.5。
+- 使用 `large`、XPU、float16、batch 1、prelude forcing、全局 beam 1、CFG 1。
 - 固定传入 `instruments:["voice"]`。
 - 空块默认重试 3 次：第一次 beam 3，随后 temperature 0.6、CFG 1.75 采样。
 - 正式 MCP 工具自动继续完整流水线；只有参数或源码实验需要单独保留人声 MIDI 并通过 question 试听验收。
