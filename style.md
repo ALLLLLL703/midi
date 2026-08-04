@@ -87,6 +87,7 @@ MCP SDK v1.29 无法从经过 `superRefine()` 包装的 Zod object 导出属性�
 - 删除含义混杂的 `audio_to_midi`。`vocal_audio_to_midi` 固定执行 Demucs 双 stem、人声转写、伴奏转写和完整 MIDI 合并；`instrumental_audio_to_midi` 直接转写无主唱音频，不运行 Demucs。
 - 人声工具默认使用已通过《天雨》试听验收的 `large`、XPU、float16、batch 1、prelude forcing、beam 3、CFG 1.5；这些参数仍可由调用者覆盖。
 - 人声 stem 固定使用 `voice` 约束，并默认启用 3 次空块回退：优先 beam 3，再以 temperature 0.6、CFG 1.75 采样。伴奏 stem 沿用已验收流程的 beam 1、CFG 1，且不启用空块回退。
+- 两个 stem 均固定传 `--detect-tempo false`，与已验收流程一致，并避免系统包环境因可选 `beat_this` 缺失而在推理前失败。
 - Demucs 必须先以 `--two-stems=vocals` 生成 `vocals.wav` 和 `no_vocals.wav`，禁止先转写原始混音后再叠加人声。
 - MuScriptor 顺序转写两个 stem；先完成人声，再转写伴奏，避免并发争抢 XPU。伴奏 MIDI 只来自 `no_vocals.wav`。
 - 合并阶段忽略人声源 MIDI 的轨道名，将全部音符按秒映射到伴奏 tempo map，折叠成一个 `lead vocal` 轨。

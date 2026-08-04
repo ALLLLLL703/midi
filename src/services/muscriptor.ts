@@ -67,6 +67,7 @@ const REQUIRED_TRANSCRIBE_FLAGS = [
   "--beam-size",
   "--prelude-forcing",
   "--instruments",
+  "--detect-tempo",
   "--empty-output-retries",
   "--empty-output-temperature",
   "--empty-output-cfg-coef",
@@ -134,6 +135,8 @@ export function buildTranscriptionArguments(
     "--beam-size",
     String(options.beamSize),
     options.preludeForcing ? "--prelude-forcing" : "--no-prelude-forcing",
+    "--detect-tempo",
+    "false",
   ];
   if (options.dtype) arguments_.push("--dtype", options.dtype);
   if (options.instruments?.length) arguments_.push("--instruments", options.instruments.join(","));

@@ -137,6 +137,8 @@ node dist/index.js
 
 上述默认值均可覆盖并用于人声 stem。人声始终使用 `voice` 约束和空块回退；伴奏 stem 保留调用者的 `instruments` 过滤，使用上次流程的确定性 `beamSize=1`、`cfgCoef=1`，且不启用空块回退。
 
+MCP 固定使用 `--detect-tempo false`，保持人声与伴奏的秒级对齐，并避免依赖可选的 `beat_this`。
+
 成功结果包含 `outputPath`、`outputBytes`、`model`、`sourceKind`、`leadVocalIncluded`；人声工具还包含 `leadVocalNotes`。本地和 URL 音频都会复制到 0600 权限的私有快照，转录完成或失败后删除。生成结果经 Standard MIDI File 解析验证后才从私有暂存区原子发布。
 
 人声工具先用 Demucs 生成 `vocals.wav` 和 `no_vocals.wav`，先转写人声，再转写伴奏。伴奏 MIDI 只从 `no_vocals.wav` 生成；人声音符按秒折叠为一个 `lead vocal` 轨。该轨使用 General MIDI Choir Aahs（Program 53，零基代码 52），默认 velocity 127 且 CC7/CC11 为最大值；非鼓伴奏通道默认写入 CC7=89（约 70%）。MIDI 只保存旋律音高与节奏，不保存真实嗓音或歌词。
